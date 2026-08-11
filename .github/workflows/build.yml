@@ -36,8 +36,13 @@ jobs:
 
           EDITOR_VERSION=$(node --print "require('./blossom-editor/package.json').version")
           EDITOR_LOCK_VERSION=$(node --print "require('./blossom-editor/package-lock.json').version")
+          EDITOR_LOCK_ROOT_VERSION=$(node --print "require('./blossom-editor/package-lock.json').packages[''].version")
           CLIENT_VERSION=$(sed -nE "s/.*VERSION: 'v([^']+)'.*/\1/p" blossom-editor/src/renderer/src/assets/constants/system.ts)
           LOADING_VERSION=$(sed -nE 's/.*Blossom \| v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' blossom-editor/src/renderer/index.html)
+          WEB_VERSION=$(node --print "require('./blossom-web/package.json').version")
+          WEB_LOCK_VERSION=$(node --print "require('./blossom-web/package-lock.json').version")
+          WEB_LOCK_ROOT_VERSION=$(node --print "require('./blossom-web/package-lock.json').packages[''].version")
+          WEB_APP_VERSION=$(sed -nE "s/.*VERSION: 'v?([^']+)'.*/\1/p" blossom-web/src/assets/constants/blossom.ts)
           BACKEND_VERSION=$(python3 -c 'import xml.etree.ElementTree as ET; root = ET.parse("blossom-backend/pom.xml").getroot(); print(root.find("{http://maven.apache.org/POM/4.0.0}version").text.removesuffix("-SNAPSHOT"))')
 
           check_version() {
@@ -51,8 +56,13 @@ jobs:
 
           check_version "editor package" "$EDITOR_VERSION"
           check_version "editor lockfile" "$EDITOR_LOCK_VERSION"
+          check_version "editor lockfile root package" "$EDITOR_LOCK_ROOT_VERSION"
           check_version "client constant" "$CLIENT_VERSION"
           check_version "loading page" "$LOADING_VERSION"
+          check_version "web package" "$WEB_VERSION"
+          check_version "web lockfile" "$WEB_LOCK_VERSION"
+          check_version "web lockfile root package" "$WEB_LOCK_ROOT_VERSION"
+          check_version "web app constant" "$WEB_APP_VERSION"
           check_version "backend" "$BACKEND_VERSION"
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
