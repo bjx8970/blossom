@@ -1,0 +1,242 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate-version:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate tag and project versions
+        id: version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $GITHUB_REF_NAME. Expected vMAJOR.MINOR.PATCH."
+            exit 1
+          fi
+
+          EDITOR_VERSION=$(node --print "require('./blossom-editor/package.json').version")
+          EDITOR_LOCK_VERSION=$(node --print "require('./blossom-editor/package-lock.json').version")
+          CLIENT_VERSION=$(sed -nE "s/.*VERSION: 'v([^']+)'.*/\1/p" blossom-editor/src/renderer/src/assets/constants/system.ts)
+          LOADING_VERSION=$(sed -nE 's/.*Blossom \| v([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' blossom-editor/src/renderer/index.html)
+          BACKEND_VERSION=$(python3 -c 'import xml.etree.ElementTree as ET; root = ET.parse("blossom-backend/pom.xml").getroot(); print(root.find("{http://maven.apache.org/POM/4.0.0}version").text.removesuffix("-SNAPSHOT"))')
+
+          check_version() {
+            local component="$1"
+            local project_version="$2"
+            if [[ "$VERSION" != "$project_version" ]]; then
+              echo "Tag version $VERSION does not match $component version $project_version."
+              exit 1
+            fi
+          }
+
+          check_version "editor package" "$EDITOR_VERSION"
+          check_version "editor lockfile" "$EDITOR_LOCK_VERSION"
+          check_version "client constant" "$CLIENT_VERSION"
+          check_version "loading page" "$LOADING_VERSION"
+          check_version "backend" "$BACKEND_VERSION"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  backend:
+    name: Build backend
+    needs: validate-version
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blossom-backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "8"
+          cache: maven
+          cache-dependency-path: blossom-backend/**/pom.xml
+
+      - name: Build backend
+        run: mvn --batch-mode --no-transfer-progress --define skipTests package
+
+      - name: Collect backend artifact
+        run: cp backend/target/backend-blossom.jar backend-blossom.jar
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-release
+          path: blossom-backend/backend-blossom.jar
+          if-no-files-found: error
+          retention-days: 1
+
+  web:
+    name: Build web blog
+    needs: validate-version
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate-version.outputs.version }}
+    defaults:
+      run:
+        working-directory: blossom-web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: blossom-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web blog
+        run: npm run build
+
+      - name: Package web blog
+        run: cd dist && zip --recurse-paths "../blossom-${VERSION}-web-blog.zip" .
+
+      - name: Upload web blog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-blog-release
+          path: blossom-web/blossom-${{ env.VERSION }}-web-blog.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  windows:
+    name: Build Windows editor
+    needs: validate-version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.validate-version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: blossom-editor/package-lock.json
+
+      - name: Install dependencies
+        working-directory: blossom-editor
+        run: npm ci
+
+      - name: Build Windows installer
+        working-directory: blossom-editor
+        run: npm run build:win
+
+      - name: Package web client
+        shell: pwsh
+        run: Compress-Archive -Path blossom-editor/out/renderer/* -DestinationPath "blossom-editor/dist/blossom-${env:VERSION}-web-client.zip"
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            blossom-editor/dist/*-setup.exe
+            blossom-editor/dist/*-web-client.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: Build macOS editor
+    needs: validate-version
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: blossom-editor/package-lock.json
+
+      - name: Install dependencies
+        working-directory: blossom-editor
+        run: npm ci
+
+      - name: Build macOS installer
+        working-directory: blossom-editor
+        run: npm run build:mac
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: blossom-editor/dist/*.dmg
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - validate-version
+      - backend
+      - web
+      - windows
+      - macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > SHA256SUMS
+
+      - name: Create or update release
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" release/* \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
