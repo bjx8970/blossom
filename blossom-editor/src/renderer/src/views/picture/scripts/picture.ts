@@ -73,7 +73,7 @@ export const wrapperFilename = (name: string): string => {
  * 使用尖括号包裹图片地址，避免地址中的空格被 Markdown 解析器当作分隔符。
  */
 export const buildMarkdownImage = (name: string, url: string): string => {
-  const escapedName = name.replaceAll('\\', '\\\\').replaceAll(']', '\\]')
+  const escapedName = name.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
   const escapedUrl = url.replaceAll('<', '%3C').replaceAll('>', '%3E')
   return `![${escapedName}](<${escapedUrl}>)`
 }
