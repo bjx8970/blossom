@@ -87,7 +87,7 @@
       </div>
 
       <div class="picture-card-container" :style="workbencStyle.cards">
-        <div :class="['picture-card', cardClass]" v-for="(pic, index) in picturePages" :key="pic.id" @click.right="picCheckRightClick(pic, $event)">
+        <div :class="['picture-card', cardClass]" v-for="pic in picturePages" :key="pic.id" @click.right="picCheckRightClick(pic, $event)">
           <el-checkbox
             v-show="isExpandWorkbench"
             class="picture-card-check"
