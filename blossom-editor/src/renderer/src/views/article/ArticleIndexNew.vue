@@ -248,7 +248,15 @@ import type { shortcutFunc } from '@renderer/scripts/shortcut-register'
 import { treeToInfo, provideKeyDocInfo, provideKeyCurArticleInfo, isArticle } from '@renderer/views/doc/doc'
 import { TempTextareaKey, ArticleReference, DocsEditorStyle, parseTocAsync } from './scripts/article'
 import type { Toc } from './scripts/article'
-import { beforeUpload, onError, picCacheWrapper, picCacheRefresh, uploadForm, uploadDate } from '@renderer/views/picture/scripts/picture'
+import {
+  beforeUpload,
+  buildMarkdownImage,
+  onError,
+  picCacheWrapper,
+  picCacheRefresh,
+  uploadForm,
+  uploadDate
+} from '@renderer/views/picture/scripts/picture'
 // codemirror
 import { CmWrapper } from './scripts/codemirror'
 // marked
@@ -419,7 +427,7 @@ const refreshCache = () => {
  */
 const onUploadSeccess: UploadProps['onSuccess'] = (resp, file) => {
   if (resp.code === '20000') {
-    cmw.insertBlockCommand(`\n![${file.name}](${resp.data})\n`)
+    cmw.insertBlockCommand(`\n${buildMarkdownImage(file.name, resp.data)}\n`)
   } else {
     Notify.error(resp.msg, '上传失败')
   }
@@ -431,7 +439,7 @@ const onUploadSeccess: UploadProps['onSuccess'] = (resp, file) => {
  */
 const uploadFile = (file: File) => {
   uploadForm(file, curArticle.value!.pid, (url: string) => {
-    cmw.insertBlockCommand(`\n![${file.name}](${url})\n`)
+    cmw.insertBlockCommand(`\n${buildMarkdownImage(file.name, url)}\n`)
   })
 }
 //#endregion

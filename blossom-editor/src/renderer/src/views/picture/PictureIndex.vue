@@ -191,7 +191,7 @@ import { useLifecycle } from '@renderer/scripts/lifecycle'
 import { useResizeVertical } from '@renderer/scripts/resize-devider-vertical'
 
 // component
-import { articleNamesToArray, picCacheWrapper, Picture, picCacheRefresh } from './scripts/picture'
+import { articleNamesToArray, buildMarkdownImage, picCacheWrapper, Picture, picCacheRefresh } from './scripts/picture'
 import PictureTreeDocs from './PictureTreeDocs.vue'
 import PictureUpload from './PictureUpload.vue'
 import PictureViewerInfo from './PictureViewerInfo.vue'
@@ -375,7 +375,7 @@ const copyUrl = (url: string) => {
  */
 const copyMarkdownUrl = (url: string, picName: string, event: MouseEvent) => {
   event.preventDefault()
-  writeText(`![${picName}](${url})`)
+  writeText(buildMarkdownImage(picName, url))
   ElMessage.info({ message: '已复制 MD 格式链接', duration: 3000, offset: 10, grouping: true, icon: CopyDocument, customClass: 'bl-message' })
 }
 

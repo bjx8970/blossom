@@ -91,7 +91,7 @@ import { useUserStore } from '@renderer/stores/user'
 import { toLogin, toSetting } from '@renderer/router'
 import { Sunny, Moon, Setting, Crop } from '@element-plus/icons-vue'
 import { docTreeApi, uploadFileApi } from '@renderer/api/blossom'
-import { handleUploadSeccess, handleUploadError } from '@renderer/views/picture/scripts/picture'
+import { buildMarkdownImage, handleUploadSeccess, handleUploadError } from '@renderer/views/picture/scripts/picture'
 import { isEmpty } from 'lodash'
 import { printScreen, readImageToDataUrl, readImageToPNG, writeText } from '@renderer/assets/utils/electron'
 import { isBlank } from '@renderer/assets/utils/obj'
@@ -224,7 +224,7 @@ const printscreenUpload = () => {
         if (copyType.value == 'http') {
           writeText(url)
         } else if (copyType.value == 'markdown') {
-          writeText(`![${filename}](${resp.data})`)
+          writeText(buildMarkdownImage(filename, resp.data))
         } else {
         }
         // 2. 重置截图预览
