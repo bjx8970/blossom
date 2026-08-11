@@ -69,6 +69,16 @@ export const wrapperFilename = (name: string): string => {
 }
 
 /**
+ * 生成 Markdown 图片语法。
+ * 使用尖括号包裹图片地址，避免地址中的空格被 Markdown 解析器当作分隔符。
+ */
+export const buildMarkdownImage = (name: string, url: string): string => {
+  const escapedName = name.replaceAll('\\', '\\\\').replaceAll(']', '\\]')
+  const escapedUrl = url.replaceAll('<', '%3C').replaceAll('>', '%3E')
+  return `![${escapedName}](<${escapedUrl}>)`
+}
+
+/**
  * form 表单上传图片
  * @param file 文件
  * @param pid 文件所属文件夹
