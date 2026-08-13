@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { Local } from '@renderer/assets/utils/storage'
 import { loginApi, logoutApi, checkApi, userinfoApi } from '@renderer/api/auth'
-import { setUserinfo } from '@renderer/assets/utils/electron'
+import { mcpClearAuth, mcpSyncAuth, setUserinfo } from '@renderer/assets/utils/electron'
+import { storeKey as serverUrlKey } from '@renderer/stores/server'
 
 export const storeKey = 'token'
 export const userinfoKey = 'userinfo'
@@ -195,11 +196,11 @@ export const useUserStore = defineStore('userStore', {
        * 登录模式, 见服务器配置 project.auth.clients.grantType
        */
       await loginApi({ username: username, password: password, clientId: 'blossom', grantType: 'password' })
-        .then((resp: any) => {
+        .then(async (resp: any) => {
           let auth = { token: resp.data.token, status: AuthStatus.Succ }
           this.auth = auth
           Local.set(storeKey, auth)
-          this.getUserinfo()
+          await this.getUserinfo()
         })
         .catch((_e) => {
           this.reset()
@@ -212,9 +213,11 @@ export const useUserStore = defineStore('userStore', {
      * 退出登录
      */
     async logout() {
-      await logoutApi().then((_) => {
+      try {
+        await logoutApi()
+      } finally {
         this.reset()
-      })
+      }
     },
     /**
      * 检查登录状态
@@ -222,11 +225,11 @@ export const useUserStore = defineStore('userStore', {
     async checkToken(succ: any, fail: any) {
       this.auth.status = AuthStatus.Checking
       await checkApi()
-        .then((resp) => {
+        .then(async (resp) => {
           let auth = { token: resp.data.token, status: AuthStatus.Succ }
           this.auth = auth
           Local.set(storeKey, auth)
-          this.getUserinfo()
+          await this.getUserinfo()
           succ()
         })
         .catch((_error) => {
@@ -240,17 +243,29 @@ export const useUserStore = defineStore('userStore', {
     /**
      * 获取用户信息
      */
-    getUserinfo() {
-      userinfoApi().then((resp) => {
+    async getUserinfo() {
+      return userinfoApi().then(async (resp) => {
         this.userinfo = resp.data
         Local.set(userinfoKey, resp.data)
         setUserinfo(resp.data)
+        try {
+          await mcpSyncAuth({
+            serverUrl: Local.get(serverUrlKey) || '',
+            token: this.auth.token,
+            userId: resp.data.id,
+            username: resp.data.username
+          })
+        } catch (error) {
+          // MCP 是可选的本机能力，IPC 同步失败不能破坏正常登录流程。
+          console.warn('同步 AI 工具接入登录信息失败', error)
+        }
       })
     },
     /**
      * 重置登录状态和用户信息
      */
     reset() {
+      void mcpClearAuth().catch((error) => console.warn('清除 AI 工具接入登录信息失败', error))
       Local.remove(storeKey)
       Local.remove(userinfoKey)
       this.auth = initAuth()

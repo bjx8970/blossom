@@ -5,6 +5,7 @@
     <select id="listAllContent" resultType="com.blossom.backend.server.article.draft.pojo.ArticleEntity">
         select id,
                version,
+               revision,
                upd_time,
                <if test="contentType == 'MARKDOWN'">markdown</if>
                <if test="contentType == 'HTML'">html</if>
@@ -28,6 +29,7 @@
         open_status,
         open_version,
         version,
+        revision,
         cre_time,
         upd_time
         from blossom_article
@@ -79,10 +81,12 @@
             <if test="starStatus != null">star_status = #{starStatus},</if>
             <if test="describes != null">describes = #{describes},</if>
             <if test="openVersion != null">open_version = #{openVersion},</if>
+            <if test="incrementRevision == true">revision = revision + 1,</if>
             upd_time = now()
         </set>
         where id = #{id}
           and user_id = #{userId}
+          <if test="expectedRevision != null">and revision = #{expectedRevision}</if>
     </update>
 
     <!-- 根据ID修改 -->
@@ -93,9 +97,11 @@
             words    = #{words},
             toc      = #{toc},
             version  = version + 1,
+            revision = revision + 1,
             upd_markdown_time = #{updMarkdownTime}
         where id = #{id}
           and user_id = #{userId}
+          <if test="expectedRevision != null">and revision = #{expectedRevision}</if>
     </update>
 
     <!-- ======================================== 统计 ========================================   -->

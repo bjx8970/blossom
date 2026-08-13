@@ -86,6 +86,12 @@ export class Request {
           userStore.reset()
           toLogin()
           return Promise.reject(res)
+        } else if (data.code === 'ARTICLE-CONFLICT') {
+          // 正文编辑器会提供保留本地内容、加载最新版和差异查看；不要先弹通用错误覆盖其安全流程。
+          if (!res.config.url?.endsWith('/article/upd/content')) {
+            Notify.warning('文章已在其他客户端被修改，本次操作未保存。请刷新文章后重试。', '更新冲突')
+          }
+          return Promise.reject(res)
         } else {
           /* 其他接口报错, 直接拒绝并提示错误信息 */
           let errorResponse = data
@@ -106,7 +112,7 @@ export class Request {
         }
         let code = err.code
         let resp = err.response
-        console.log("🚀 ~ Request ~ constructor ~ resp:123123123", resp)
+        console.log('🚀 ~ Request ~ constructor ~ resp:123123123', resp)
         if (code === 'ERR_NETWORK') {
           Notify.error('网络错误, 请检查您的网络是否通畅', '请求失败')
           return Promise.reject(err)
@@ -117,6 +123,12 @@ export class Request {
         }
         if (err.request && err.request.status === 405) {
           Notify.error(`您的请求地址可能有误, 请检查请求地址${url}`, '请求失败(405)')
+          return Promise.reject(err)
+        }
+        if (resp?.status === 409 || resp?.data?.code === 'ARTICLE-CONFLICT') {
+          if (!err.config?.url?.endsWith('/article/upd/content')) {
+            Notify.warning('文章已在其他客户端被修改，本次操作未保存。请刷新文章后重试。', '更新冲突')
+          }
           return Promise.reject(err)
         }
         if (resp && resp.data) {

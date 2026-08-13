@@ -2,89 +2,121 @@ import { app, shell, ipcMain, BrowserWindow, Menu, IpcMainEvent, Tray, HandlerDe
 import { join } from 'path'
 import { electronApp, optimizer, is, platform } from '@electron-toolkit/utils'
 import icon from '../../resources/imgs/icon.ico?asset'
+import iconPng from '../../resources/imgs/icon.png?asset'
 import printScreen from './printScreen'
 import ShortcutRegistrant from './shortcut'
+import { registerMcpIpc } from './mcp/ipc'
+import { McpServiceManager } from './mcp/serviceManager'
+import { runMcpStdioBridge } from './mcp/stdioBridge'
 
 // 主窗口
 let mainWindow: BrowserWindow | undefined
-let tray: Tray
+let tray: Tray | undefined
 let blossomUserinfo: any
+let mcpServiceManager: McpServiceManager | undefined
+let appQuitting = false
 
-const additionalData = { blossomSingle: 'blossomSingle' }
-const gotTheLock = app.requestSingleInstanceLock(additionalData)
+const mcpStdioMode = process.argv.includes('--mcp-stdio')
 
-if (!gotTheLock) {
-  app.quit()
+if (mcpStdioMode) {
+  void runMcpStdioBridge()
+    .catch((error) => {
+      process.stderr.write(`Blossom MCP stdio: ${error instanceof Error ? error.message : String(error)}\n`)
+      process.exitCode = 1
+    })
+    .finally(() => app.quit())
 } else {
-  app.on('second-instance', (_event, _commandLine, _workingDirectory, _additionalData) => {
-    // 输出从第二个实例中接收到的数据
-    // 有人试图运行第二个实例，我们应该关注我们的窗口
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
-  })
+  const additionalData = { blossomSingle: 'blossomSingle' }
+  const gotTheLock = app.requestSingleInstanceLock(additionalData)
 
-  // This method will be called when Electron has finished initialization and is ready to create browser windows. Some APIs can only be used after this event occurs.
-  /**
-   * =========================================================================================================================
-   * APP 启动完成
-   * =========================================================================================================================
-   */
-  app.whenReady().then(() => {
-    // Set app user model id for windows
-    electronApp.setAppUserModelId('com.electron')
-    /*
-     * Default open or close DevTools by F12 in development and ignore CommandOrControl + R in production.
-     * see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+  if (!gotTheLock) {
+    app.quit()
+  } else {
+    app.on('second-instance', (_event, _commandLine, _workingDirectory, _additionalData) => {
+      // 输出从第二个实例中接收到的数据
+      // 有人试图运行第二个实例，我们应该关注我们的窗口
+      showMainWindow()
+    })
+
+    // This method will be called when Electron has finished initialization and is ready to create browser windows. Some APIs can only be used after this event occurs.
+    /**
+     * =========================================================================================================================
+     * APP 启动完成
+     * =========================================================================================================================
      */
-    app.on('browser-window-created', (_, window) => {
-      optimizer.watchWindowShortcuts(window)
-    })
+    app.whenReady().then(async () => {
+      // Set app user model id for windows
+      electronApp.setAppUserModelId('com.electron')
+      mcpServiceManager = new McpServiceManager()
+      await mcpServiceManager.initialize()
+      registerMcpIpc(mcpServiceManager, () => mainWindow)
+      /*
+       * Default open or close DevTools by F12 in development and ignore CommandOrControl + R in production.
+       * see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+       */
+      app.on('browser-window-created', (_, window) => {
+        optimizer.watchWindowShortcuts(window)
+      })
 
-    if (platform.isMacOS) {
-      // Mac 平台下要设置 dock 栏图标
-      // app.dock.setIcon(iconPng)
-    }
+      if (platform.isMacOS) {
+        // Mac 平台下要设置 dock 栏图标
+        // app.dock.setIcon(iconPng)
+      }
 
-    setTimeout(() => {
-      createMainWindow()
-    }, 300)
+      setTimeout(() => {
+        createMainWindow()
+      }, 300)
 
-    // session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    //   callback({
-    //     responseHeaders: {
-    //       ...details.responseHeaders,
-    //       'Content-Security-Policy': ['frame-ancestors *']
-    //     }
-    //   })
-    // })
+      // session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      //   callback({
+      //     responseHeaders: {
+      //       ...details.responseHeaders,
+      //       'Content-Security-Policy': ['frame-ancestors *']
+      //     }
+      //   })
+      // })
 
-    app.on('activate', function () {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
-      if (BrowserWindow.getAllWindows().length === 0) {
-        if (mainWindow) {
+      app.on('activate', function () {
+        // On macOS it's common to re-create a window in the app when the
+        // dock icon is clicked and there are no other windows open.
+        if (BrowserWindow.getAllWindows().length === 0) {
+          if (mainWindow) {
+            mainWindow.show()
+          } else {
+            createMainWindow()
+          }
+        } else if (mainWindow) {
           mainWindow.show()
-        } else {
-          createMainWindow()
         }
-      } else if (mainWindow) {
-        mainWindow.show()
-      }
-    })
+      })
 
-    // Quit when all windows are closed, except on macOS. There, it's common
-    // for applications and their menu bar to stay active until the user quits
-    // explicitly with Cmd + Q.
-    app.on('window-all-closed', () => {
-      if (process.platform !== 'darwin') {
-        app.quit()
-      } else {
-        if (mainWindow?.isDestroyed()) {
-          mainWindow = undefined
+      // Quit when all windows are closed, except on macOS. There, it's common
+      // for applications and their menu bar to stay active until the user quits
+      // explicitly with Cmd + Q.
+      app.on('window-all-closed', () => {
+        if (!appQuitting && shouldKeepAliveForMcp()) return
+        if (process.platform !== 'darwin') {
+          app.quit()
+        } else {
+          if (mainWindow?.isDestroyed()) {
+            mainWindow = undefined
+          }
         }
-      }
+      })
+    })
+  }
+
+  let quitCleanupStarted = false
+  let quitCleanupFinished = false
+  app.on('before-quit', (event) => {
+    appQuitting = true
+    if (quitCleanupFinished) return
+    event.preventDefault()
+    if (quitCleanupStarted) return
+    quitCleanupStarted = true
+    void (mcpServiceManager?.stopForQuit() || Promise.resolve()).finally(() => {
+      quitCleanupFinished = true
+      app.quit()
     })
   })
 }
@@ -127,7 +159,7 @@ const buildWindow = (_title: string): BrowserWindow => {
  * =========================================================================================================================
  */
 function createMainWindow(): void {
-  if (mainWindow != undefined) {
+  if (mainWindow != undefined && !mainWindow.isDestroyed()) {
     return
   }
   mainWindow = buildWindow('Blossom')
@@ -162,22 +194,40 @@ function createMainWindow(): void {
  * =========================================================================================================================
  */
 const initTray = () => {
-  if (platform.isMacOS) {
-    return
-  }
+  if (tray && !tray.isDestroyed()) return
   console.log('1. 创建托盘 Tray')
-  tray = new Tray(icon)
+  tray = new Tray(platform.isWindows ? icon : iconPng)
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Blossom 官网 ', click: () => shell.openExternal('https://www.wangyunf.com/blossom-doc/index') },
     { type: 'separator' },
-    { label: '显示', click: () => mainWindow!.show() },
+    { label: '显示', click: showMainWindow },
     { label: '退出', click: () => app.quit() }
   ])
   tray.setToolTip('Blossom\n未登录')
   tray.setContextMenu(contextMenu)
   tray.addListener('double-click', () => {
-    mainWindow!.show()
+    showMainWindow()
   })
+}
+
+const shouldKeepAliveForMcp = (): boolean => {
+  const status = mcpServiceManager?.getStatus()
+  return Boolean(status && (status.enabled || status.running || status.state === 'waiting-auth'))
+}
+
+const showMainWindow = (): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = undefined
+    createMainWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+const clearMainWindowReference = (closedWindow: BrowserWindow): void => {
+  if (mainWindow === closedWindow) mainWindow = undefined
 }
 
 /**
@@ -335,6 +385,15 @@ const initOnMainWindow = (mainWindow: BrowserWindow): void => {
   mainWindow.on('ready-to-show', () => {
     mainWindow.show()
   })
+  mainWindow.on('close', (event) => {
+    if (!appQuitting && shouldKeepAliveForMcp()) {
+      event.preventDefault()
+      mainWindow.hide()
+    }
+  })
+  mainWindow.on('closed', () => {
+    clearMainWindowReference(mainWindow)
+  })
   /**
    * 下载URL, 使用 mainWin.webContents.downloadURL(url) 触发
    * @param event
@@ -380,9 +439,9 @@ const initOnMainWindow = (mainWindow: BrowserWindow): void => {
    */
   ipcMain.on('set-userinfo', (_: IpcMainEvent, userinfo: any): void => {
     blossomUserinfo = userinfo
-    console.log('当前登录用户:', userinfo)
+    console.log('Blossom 用户已登录')
     if (platform.isWindows) {
-      tray.setToolTip(`Blossom\n用户: ${userinfo.username}\n昵称: ${userinfo.nickName}`)
+      tray?.setToolTip(`Blossom\n用户: ${userinfo.username}\n昵称: ${userinfo.nickName}`)
     }
   })
   /**

@@ -67,7 +67,8 @@ public class ArticleRecycleController {
      */
     @GetMapping("/download")
     public void download(@RequestParam("id") Long id, HttpServletResponse response) throws IOException {
-        ArticleRecycleEntity article = baseService.selectById(id);
+        ArticleRecycleEntity article = baseService.selectById(id, AuthContext.getUserId());
+        com.blossom.common.base.exception.XzException404.throwBy(article == null, "回收站文章不存在或无权访问");
         if (StrUtil.isBlank(article.getMarkdown())) {
             article.setMarkdown("文章无内容");
         }

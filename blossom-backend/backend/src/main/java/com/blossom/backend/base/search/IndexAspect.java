@@ -18,6 +18,8 @@ import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Method;
@@ -62,11 +64,25 @@ public class IndexAspect {
             return;
         }
         ArticleIndexMsg indexMsg = new ArticleIndexMsg(indexMsgTypeEnum, customerId, AuthContext.getUserId());
-        try {
-            IndexMsgQueue.add(indexMsg);
-        } catch (InterruptedException e) {
-            // 不抛出, 暂时先记录
-            log.error("索引操作失败" + e.getMessage());
+        Runnable publish = () -> {
+            try {
+                IndexMsgQueue.add(indexMsg);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                // 索引最终一致，不能让消息队列中断反向破坏已完成的业务事务。
+                log.error("索引操作失败: {}", e.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    publish.run();
+                }
+            });
+        } else {
+            publish.run();
         }
     }
 

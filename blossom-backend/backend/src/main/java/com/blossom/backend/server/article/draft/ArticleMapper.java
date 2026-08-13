@@ -43,12 +43,12 @@ public interface ArticleMapper extends BaseMapper<ArticleEntity> {
     /**
      * 根据ID修改
      */
-    void updById(ArticleEntity entity);
+    int updById(ArticleEntity entity);
 
     /**
      * 修改文章内容
      */
-    void updContentById(ArticleEntity entity);
+    int updContentById(ArticleEntity entity);
 
     /**
      * 查询某段时间内编辑过内容的文章数

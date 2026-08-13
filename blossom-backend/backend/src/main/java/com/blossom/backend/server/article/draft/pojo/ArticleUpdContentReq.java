@@ -30,6 +30,10 @@ public class ArticleUpdContentReq extends AbstractPOJO {
     @NotNull(message = "[文章ID] 为必填项")
     private Long id;
     /**
+     * 期望修订号。旧客户端可不传；传入时使用乐观锁防止覆盖其他客户端的修改。
+     */
+    private Long expectedRevision;
+    /**
      * 名称, 用于引用关系表中的名称冗余
      */
     @NotBlank(message = "文章名称为必填项")

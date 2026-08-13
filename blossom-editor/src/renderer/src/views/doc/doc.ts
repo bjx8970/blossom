@@ -25,7 +25,8 @@ export const treeToInfo = (tree: DocTree): DocInfo => {
     openStatus: 0,
     starStatus: 0,
     type: tree.ty,
-    storePath: tree.sp
+    storePath: tree.sp,
+    revision: tree.r
   }
 }
 

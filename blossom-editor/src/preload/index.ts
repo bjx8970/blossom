@@ -1,6 +1,7 @@
 // @ts-ignore (define in dts)
 import { contextBridge, ipcRenderer, clipboard, shell, OpenExternalOptions, NativeImage } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { McpCopyConfigKind, McpRendererAuth } from '../main/mcp/types'
 
 // Custom APIs for renderer
 const api = {}
@@ -21,6 +22,14 @@ const ipcToRender = {
  * 渲染进程调用主进程方法
  */
 const rednerToIpc = {
+  /** Blossom 本地 MCP 服务 */
+  mcpGetStatus: () => ipcRenderer.invoke('mcp:get-status'),
+  mcpSetEnabled: (enabled: boolean) => ipcRenderer.invoke('mcp:set-enabled', enabled),
+  mcpSetPort: (port: number) => ipcRenderer.invoke('mcp:set-port', port),
+  mcpRotateToken: () => ipcRenderer.invoke('mcp:rotate-token'),
+  mcpCopyConfig: (kind: McpCopyConfigKind = 'stdio') => ipcRenderer.invoke('mcp:copy-config', kind),
+  mcpSyncAuth: (auth: McpRendererAuth) => ipcRenderer.invoke('mcp:sync-auth', auth),
+  mcpClearAuth: () => ipcRenderer.invoke('mcp:clear-auth'),
   /**
    * 窗口操作
    */

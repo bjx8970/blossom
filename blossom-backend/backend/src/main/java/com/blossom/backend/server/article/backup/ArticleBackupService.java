@@ -201,7 +201,7 @@ public class ArticleBackupService {
                 String content = getContentByType(articleDetail, type, user,
                         BLOG_COLOR, WATER_ENABLED, WATERMARK_CONTENT, WATERMARK_FONTSIZE, WATERMARK_COLOR, WATERMARK_GAP
                 );
-                content = formatContent(content, toLocal, article.getI(), article.getN());
+                content = formatContent(content, toLocal, userId, article.getI(), article.getN());
                 String id = String.valueOf(articleDetail.getId());
                 String version = String.valueOf(articleDetail.getVersion());
 
@@ -224,9 +224,10 @@ public class ArticleBackupService {
                 backLogs.add("");
                 if (articleId != null) {
                     // 查询文章引用的图片
-                    List<ArticleReferenceEntity> refs = referenceService.listPics(articleId);
+                    List<ArticleReferenceEntity> refs = referenceService.listPics(userId, articleId);
                     PictureEntity where = new PictureEntity();
                     where.setUrls(refs.stream().map(ArticleReferenceEntity::getTargetUrl).collect(Collectors.toList()));
+                    where.setUserId(userId);
                     List<PictureEntity> pics = pictureService.listAll(where);
                     backLogs.add("[图片备份] 图片个数: " + pics.size());
                     backLogs.add("┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ↓↓ 图片列表 ↓↓ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -407,12 +408,12 @@ public class ArticleBackupService {
      * @param articleName 文章名称，包含递归后的所有上级菜单名称，用于计算文章向上级文件夹查找的次数
      * @return 返回替换后的正文内容
      */
-    private String formatContent(String content, YesNo toLocal, Long articleId, String articleName) {
+    private String formatContent(String content, YesNo toLocal, Long userId, Long articleId, String articleName) {
         if (toLocal == YesNo.NO) {
             return content;
         }
 
-        List<ArticleReferenceEntity> refs = referenceService.listPics(articleId);
+        List<ArticleReferenceEntity> refs = referenceService.listPics(userId, articleId);
         final String domain = paramService.getDomain();
 
         // 计算字符出现的次数

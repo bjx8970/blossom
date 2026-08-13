@@ -75,7 +75,7 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
         List<Long> allSubjectIds = allSubjects.stream().map(FolderEntity::getId).collect(Collectors.toList());
 
         // 2. 查询全部专题的子文件夹
-        List<FolderEntity> allSubjectChildFolders = baseMapper.recursiveToChildren(CollUtil.newArrayList(allSubjectIds));
+        List<FolderEntity> allSubjectChildFolders = baseMapper.recursiveToChildren(CollUtil.newArrayList(allSubjectIds), userId);
         allSubjectIds.addAll(allSubjectChildFolders.stream().map(FolderEntity::getId).collect(Collectors.toList()));
 
         // 3. 查询这些文件夹下的所有文章
@@ -120,8 +120,10 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
      *
      * @param id 文件夹ID
      */
-    public FolderEntity selectById(Long id) {
-        return baseMapper.selectOne(new LambdaQueryWrapper<FolderEntity>().eq(FolderEntity::getId, id));
+    public FolderEntity selectById(Long id, Long userId) {
+        return baseMapper.selectOne(new LambdaQueryWrapper<FolderEntity>()
+                .eq(FolderEntity::getId, id)
+                .eq(FolderEntity::getUserId, userId));
     }
 
     /**
@@ -141,7 +143,8 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
     public FolderEntity insert(FolderEntity folder) {
         // 如果是
         if (StrUtil.isBlank(folder.getStorePath()) || "/".equals(folder.getStorePath())) {
-            FolderEntity parentFolder = this.selectById(folder.getPid());
+            FolderEntity parentFolder = folder.getPid() == null || folder.getPid() == 0
+                    ? null : this.selectById(folder.getPid(), folder.getUserId());
             // 无上级菜单, 使用默认值, 否则使用上级菜单的路径
             if (parentFolder == null) {
                 folder.setStorePath(formatStorePath("/"));
@@ -150,7 +153,12 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
             }
         }
         folder.setId(PrimaryKeyUtil.nextId());
-        baseMapper.insert(folder);
+        if (folder.getPid() != null && folder.getPid() > 0) {
+            FolderEntity parent = selectById(folder.getPid(), folder.getUserId());
+            XzException404.throwBy(parent == null, "上级文件夹不存在或无权访问");
+            XzException400.throwBy(!folder.getType().equals(parent.getType()), "上级文件夹类型不一致");
+        }
+        XzException500.throwBy(baseMapper.insert(folder) != 1, "文件夹创建失败");
         return folder;
     }
 
@@ -166,7 +174,7 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
     public Long update(FolderEntity folder) {
         updateParamValid(folder);
         updateStorePath(folder);
-        baseMapper.updById(folder);
+        XzException404.throwBy(baseMapper.updById(folder) != 1, "文件夹不存在或无权修改");
         return folder.getId();
     }
 
@@ -178,15 +186,17 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
      * @param folderId 文件夹ID
      */
     @Transactional(rollbackFor = Exception.class)
-    public void delete(Long folderId) {
+    public void delete(Long folderId, Long userId) {
+        XzException404.throwBy(selectById(folderId, userId) == null, "文件夹不存在或无权删除");
         // 文件夹下有文件夹, 无法删除
-        if (baseMapper.recursiveToChildren(CollUtil.newArrayList(folderId)).stream().anyMatch(d -> !d.getId().equals(folderId))) {
+        if (baseMapper.recursiveToChildren(CollUtil.newArrayList(folderId), userId).stream().anyMatch(d -> !d.getId().equals(folderId))) {
             throw new XzException500("文件夹下有子文件夹, 无法删除, 请先删除子文件夹");
         }
 
         // 文件夹下有文章, 无法删除
         ArticleEntity articleWhere = new ArticleEntity();
         articleWhere.setPids(CollUtil.newArrayList(folderId));
+        articleWhere.setUserId(userId);
         if (CollUtil.isNotEmpty(articleMapper.listAll(articleWhere))) {
             throw new XzException500("文件夹下有文章, 无法删除, 请先删除下属文章");
         }
@@ -194,11 +204,15 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
         // 文件夹下有图片, 无法删除
         PictureEntity picReq = new PictureEntity();
         picReq.setPid(folderId);
+        picReq.setUserId(userId);
         if (CollUtil.isNotEmpty(picMapper.listAll(picReq))) {
             throw new XzException500("文件夹下有图片, 无法删除, 请先删除下属图片");
         }
 
-        baseMapper.deleteById(folderId);
+        int affected = baseMapper.delete(new LambdaQueryWrapper<FolderEntity>()
+                .eq(FolderEntity::getId, folderId)
+                .eq(FolderEntity::getUserId, userId));
+        XzException404.throwBy(affected != 1, "文件夹不存在或无权删除");
     }
 
     /**
@@ -209,9 +223,10 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
     private void updateStorePath(FolderEntity folder) {
         // 处理文件夹的存储地址
         if (StrUtil.isNotBlank(folder.getStorePath())) {
-            final FolderEntity oldFolder = selectById(folder.getId());
+            final FolderEntity oldFolder = selectById(folder.getId(), folder.getUserId());
+            XzException404.throwBy(oldFolder == null, "文件夹不存在或无权修改");
             // 获取所有子文件夹
-            List<FolderEntity> children = baseMapper.recursiveToChildren(CollUtil.newArrayList(folder.getId()));
+            List<FolderEntity> children = baseMapper.recursiveToChildren(CollUtil.newArrayList(folder.getId()), folder.getUserId());
             // 子文件夹中排除自己, 排除存储路径不等于自己的
             children = children.stream()
                     .filter(child -> !child.getId().equals(folder.getId()))
@@ -221,7 +236,9 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
                 FolderEntity upd = new FolderEntity();
                 upd.setStorePath(folder.getStorePath());
                 upd.setIds(children.stream().map(FolderEntity::getId).collect(Collectors.toList()));
-                baseMapper.updByIds(upd);
+                upd.setUserId(folder.getUserId());
+                int affected = baseMapper.updByIds(upd);
+                XzException500.throwBy(affected != children.size(), "子文件夹存储路径更新不完整");
             }
         }
         folder.setStorePath(formatStorePath(folder.getStorePath()));
@@ -260,6 +277,18 @@ public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
      */
     private void updateParamValid(FolderEntity folder) {
         XzException404.throwBy(folder.getId() == null, "ID不得为空");
+        XzException404.throwBy(folder.getUserId() == null, "用户信息不得为空");
         XzException400.throwBy(folder.getId().equals(folder.getPid()), "上级文件夹不能是自己");
+        FolderEntity current = selectById(folder.getId(), folder.getUserId());
+        XzException404.throwBy(current == null, "文件夹不存在或无权修改");
+        if (folder.getPid() != null && folder.getPid() > 0) {
+            FolderEntity parent = selectById(folder.getPid(), folder.getUserId());
+            XzException404.throwBy(parent == null, "上级文件夹不存在或无权访问");
+            XzException400.throwBy(!current.getType().equals(parent.getType()), "上级文件夹类型不一致");
+            boolean parentIsChild = baseMapper.recursiveToChildren(
+                            CollUtil.newArrayList(folder.getId()), folder.getUserId()).stream()
+                    .anyMatch(child -> child.getId().equals(folder.getPid()));
+            XzException400.throwBy(parentIsChild, "不能将文件夹移动到自己的子文件夹中");
+        }
     }
 }

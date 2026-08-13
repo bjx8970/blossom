@@ -29,6 +29,8 @@ public class ArticleUpdContentRes extends AbstractPOJO  implements Serializable 
      * 文章版本
      */
     private Integer version;
+    /** 文章修订号 */
+    private Long revision;
     /**
      * 字数
      */

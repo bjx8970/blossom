@@ -36,6 +36,11 @@ public class AuthConstant {
     public static final String WHITE_LIST_ATTRIBUTE_KEY = "IS_WHITE_LIST";
 
     /**
+     * 已由 AI 设备令牌过滤器完成认证。常规会话认证过滤器据此跳过重复解析。
+     */
+    public static final String AI_DEVICE_AUTH_ATTRIBUTE_KEY = "AI_DEVICE_AUTHENTICATED";
+
+    /**
      * 默认忽略的请求
      */
     public static final List<String> DEFAULT_WHITE_LIST = new ArrayList<String>() {

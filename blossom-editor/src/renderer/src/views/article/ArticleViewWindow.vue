@@ -37,6 +37,7 @@ import { useConfigStore } from '@renderer/stores/config'
 import { parseTocAsync } from './scripts/article'
 import type { Toc } from './scripts/article'
 import AppHeader from '@renderer/components/AppHeader.vue'
+import { sanitizeArticleHtml } from './scripts/sanitize-html'
 
 const configStore = useConfigStore()
 const { editorStyle } = storeToRefs(configStore)
@@ -58,7 +59,7 @@ const toScroll = (id: string) => {
 
 const initPreview = (articleId: string) => {
   articleInfoApi({ id: articleId, showToc: false, showMarkdown: false, showHtml: true }).then((resp) => {
-    article.value = resp.data
+    article.value = { ...resp.data, html: sanitizeArticleHtml(resp.data.html) }
     document.title = `《${resp.data.name}》`
     nextTick(() => initToc())
   })

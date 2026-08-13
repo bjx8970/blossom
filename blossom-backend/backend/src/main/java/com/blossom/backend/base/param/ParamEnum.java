@@ -65,6 +65,11 @@ public enum ParamEnum {
     SERVER_JWT_SECRET(true, 9999,""),
 
     /**
+     * AI 设备令牌 HMAC 服务端 pepper
+     */
+    AI_TOKEN_PEPPER(true, 9999,""),
+
+    /**
      * 开启首页流量监控
      */
     SENTINEL_ENABLED(false, 5,""),

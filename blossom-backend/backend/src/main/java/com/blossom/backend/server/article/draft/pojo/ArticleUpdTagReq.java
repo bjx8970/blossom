@@ -23,6 +23,8 @@ public class ArticleUpdTagReq extends AbstractPOJO {
     @Min(value = 0, message = "[文章ID] 不能小于0")
     @NotNull(message = "[文章ID] 为必填项")
     private Long id;
+    /** 期望修订号 */
+    private Long expectedRevision;
     /**
      * 标签, toc 标签因为具有特殊意义, 必须小写
      */

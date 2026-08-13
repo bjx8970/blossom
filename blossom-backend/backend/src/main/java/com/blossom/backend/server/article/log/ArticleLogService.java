@@ -1,6 +1,5 @@
 package com.blossom.backend.server.article.log;
 
-import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.blossom.backend.base.param.ParamEnum;
@@ -8,6 +7,7 @@ import com.blossom.backend.base.param.ParamService;
 import com.blossom.backend.base.param.pojo.ParamEntity;
 import com.blossom.backend.server.article.log.pojo.ArticleLogEntity;
 import com.blossom.common.base.util.DateUtils;
+import com.blossom.common.base.exception.XzException404;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -28,12 +28,14 @@ public class ArticleLogService extends ServiceImpl<ArticleLogMapper, ArticleLogE
 
     private final ParamService paramService;
 
-    public List<ArticleLogEntity> listAll(Long articleId) {
-        return baseMapper.listAll(articleId);
+    public List<ArticleLogEntity> listAll(Long articleId, Long userId) {
+        return baseMapper.listAll(articleId, userId);
     }
 
-    public String content(Long id) {
-        return baseMapper.selectById(id).getMarkdown();
+    public String content(Long id, Long userId) {
+        String content = baseMapper.selectContent(id, userId);
+        XzException404.throwBy(content == null, "文章历史不存在或无权访问");
+        return content;
     }
 
     /**
@@ -42,10 +44,17 @@ public class ArticleLogService extends ServiceImpl<ArticleLogMapper, ArticleLogE
     @Async
     @Transactional(rollbackFor = Exception.class)
     public void insert(Long articleId, Integer version, String markdown) {
+        insertSync(articleId, version, markdown);
+    }
+
+    /**
+     * 在调用方事务内保存快照。AI/CAS 写入用它确保历史与正文原子提交。
+     */
+    public void insertSync(Long articleId, Integer version, String markdown) {
         ArticleLogEntity log = new ArticleLogEntity();
         log.setArticleId(articleId);
         log.setVersion(version);
-        log.setMarkdown(StrUtil.isBlank(markdown) ? "无内容" : markdown);
+        log.setMarkdown(markdown == null ? "" : markdown);
         log.setCreTime(DateUtils.date());
         baseMapper.insert(log);
     }

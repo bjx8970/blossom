@@ -233,7 +233,8 @@ import {
   articleUpdApi,
   articleOpenApi,
   articleSyncApi,
-  articleStarApi
+  articleStarApi,
+  getKnownArticleRevision
 } from '@renderer/api/blossom'
 import { isNotBlank, isNull } from '@renderer/assets/utils/obj'
 import { openExtenal, openNewIconWindow } from '@renderer/assets/utils/electron'
@@ -544,7 +545,10 @@ const saveDoc = async (formEl: FormInstance | undefined) => {
   await formEl.validate((valid, _fields) => {
     if (valid) {
       saveLoading.value = true
-      const handleResp = (_: any) => {
+      const handleResp = (resp: any) => {
+        if (docForm.value.type === 3 && curDocDialogType.value === 'upd') {
+          docForm.value.revision = resp?.data?.revision ?? getKnownArticleRevision(docForm.value.id) ?? docForm.value.revision
+        }
         Notify.success(curDocDialogType.value === 'upd' ? `修改《${docForm.value.name}》成功` : `新增《${docForm.value.name}》成功`)
         emits('saved', curDocDialogType.value, docForm.value)
       }
@@ -569,7 +573,10 @@ const saveDoc = async (formEl: FormInstance | undefined) => {
             .finally(handleFinally)
         if (curDocDialogType.value == 'upd')
           // 修改文章
-          articleUpdApi(docForm.value)
+          articleUpdApi({
+            ...docForm.value,
+            expectedRevision: docForm.value.revision ?? docForm.value.version ?? 0
+          })
             .then((resp) => handleResp(resp))
             .finally(handleFinally)
       }

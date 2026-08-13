@@ -39,7 +39,7 @@ public class ArticleReferenceService extends ServiceImpl<ArticleReferenceMapper,
      */
     @Transactional(rollbackFor = Exception.class)
     public void bind(Long userId, Long sourceId, String sourceName, List<ArticleReferenceReq> references) {
-        delete(sourceId);
+        delete(sourceId, userId);
         // 没有图片, 则不保存
         if (CollUtil.isEmpty(references)) {
             return;
@@ -101,9 +101,10 @@ public class ArticleReferenceService extends ServiceImpl<ArticleReferenceMapper,
      * @param articleId 文章ID
      */
     @Transactional(rollbackFor = Exception.class)
-    public void delete(Long articleId) {
+    public void delete(Long articleId, Long userId) {
         LambdaQueryWrapper<ArticleReferenceEntity> where = new LambdaQueryWrapper<>();
-        where.eq(ArticleReferenceEntity::getSourceId, articleId);
+        where.eq(ArticleReferenceEntity::getSourceId, articleId)
+                .eq(ArticleReferenceEntity::getUserId, userId);
         baseMapper.delete(where);
     }
 
@@ -123,8 +124,8 @@ public class ArticleReferenceService extends ServiceImpl<ArticleReferenceMapper,
      *
      * @param articleId 文章ID
      */
-    public List<ArticleReferenceEntity> listPics(Long articleId) {
-        return baseMapper.listPic(articleId);
+    public List<ArticleReferenceEntity> listPics(Long userId, Long articleId) {
+        return baseMapper.listPic(userId, articleId);
     }
 
     /**

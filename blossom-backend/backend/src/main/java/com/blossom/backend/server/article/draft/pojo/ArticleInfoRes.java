@@ -76,6 +76,10 @@ public class ArticleInfoRes extends AbstractPOJO implements Serializable {
      */
     private Integer version;
     /**
+     * 并发修订号
+     */
+    private Long revision;
+    /**
      * Markdown 内容
      */
     private String markdown;

@@ -97,7 +97,7 @@ public class DocService {
                 // 剔除掉图片文件夹
                 List<Long> articleFolderIds = pids.stream().filter(i -> !picFolderIds.contains(i)).collect(Collectors.toList());
                 if(CollUtil.isNotEmpty(articleFolderIds)) {
-                    List<FolderEntity> articleFolder = folderMapper.recursiveToParent(articleFolderIds);
+                    List<FolderEntity> articleFolder = folderMapper.recursiveToParent(articleFolderIds, req.getUserId());
                     all.addAll(DocUtil.toDocTreesByFolders(articleFolder));
                 }
             }
@@ -122,7 +122,7 @@ public class DocService {
 
             if (CollUtil.isNotEmpty(articles)) {
                 List<Long> pidList = articles.stream().map(ArticleEntity::getPid).collect(Collectors.toList());
-                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList);
+                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList, req.getUserId());
                 all.addAll(DocUtil.toDocTreesByFolders(folders));
             }
         }
@@ -138,8 +138,8 @@ public class DocService {
 
             if (CollUtil.isNotEmpty(subjects)) {
                 List<Long> subjectIds = subjects.stream().map(FolderEntity::getId).collect(Collectors.toList());
-                List<FolderEntity> foldersTop = folderMapper.recursiveToParent(subjectIds);
-                List<FolderEntity> foldersBottom = folderMapper.recursiveToChildren(subjectIds);
+                List<FolderEntity> foldersTop = folderMapper.recursiveToParent(subjectIds, req.getUserId());
+                List<FolderEntity> foldersBottom = folderMapper.recursiveToChildren(subjectIds, req.getUserId());
                 all.addAll(DocUtil.toDocTreesByFolders(foldersTop));
                 all.addAll(DocUtil.toDocTreesByFolders(foldersBottom));
             }
@@ -159,7 +159,7 @@ public class DocService {
 
             if (CollUtil.isNotEmpty(articles)) {
                 List<Long> pidList = articles.stream().map(ArticleEntity::getPid).collect(Collectors.toList());
-                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList);
+                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList, req.getUserId());
                 all.addAll(DocUtil.toDocTreesByFolders(folders));
             }
         }
@@ -175,7 +175,7 @@ public class DocService {
 
             if (CollUtil.isNotEmpty(articles)) {
                 List<Long> pidList = articles.stream().map(ArticleEntity::getPid).collect(Collectors.toList());
-                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList);
+                List<FolderEntity> folders = folderMapper.recursiveToParent(pidList, req.getUserId());
                 all.addAll(DocUtil.toDocTreesByFolders(folders));
             }
         }
@@ -258,6 +258,8 @@ public class DocService {
                 a.setPid(tree.getP());
                 a.setSort(tree.getS());
                 a.setUserId(AuthContext.getUserId());
+                a.setExpectedRevision(tree.getR());
+                a.setIncrementRevision(true);
                 articleService.update(a);
             }
         }

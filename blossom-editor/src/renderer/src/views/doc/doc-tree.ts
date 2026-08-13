@@ -31,6 +31,8 @@ export interface NeedUpd {
   s: number
   n: string
   ty: DocType
+  /** 文章节点的期望修订号；文件夹节点不需要。 */
+  r?: number
 }
 
 /**
@@ -68,7 +70,8 @@ export const handleTreeDrop = (
       p: node.data.p,
       s: node.data.s,
       n: node.data.n,
-      ty: node.data.ty
+      ty: node.data.ty,
+      r: node.data.r
     })
   }
 
@@ -165,7 +168,7 @@ export const handleTreeDrop = (
         const node = docTreeData.value[i]
         if (checkFolderTypeByOrigin(node, folderType) && node.s > dragSourceSort) {
           node.s -= 1
-          needUpd.push({ i: node.i, p: node.p, n: node.n, s: node.s, ty: node.ty })
+          needUpd.push({ i: node.i, p: node.p, n: node.n, s: node.s, ty: node.ty, r: node.r })
         }
       }
     } else {

@@ -3,6 +3,86 @@ import { is } from '@electron-toolkit/utils'
 import { isElectron } from './util'
 import router from '@renderer/router'
 
+export type McpServiceState = 'disabled' | 'starting' | 'waiting-auth' | 'running' | 'stopping' | 'error'
+
+export interface McpServiceStatus {
+  enabled: boolean
+  running: boolean
+  state: McpServiceState
+  host: string
+  port: number
+  endpoint: string
+  authenticated: boolean
+  userId?: string | number
+  username?: string
+  scopes: string[]
+  lastCallAt?: string
+  error?: string
+  storageSecurity: 'secure' | 'basic_text' | 'unavailable'
+}
+
+export interface McpAuthSnapshot {
+  serverUrl: string
+  token: string
+  userId: string | number
+  username: string
+}
+
+const unavailableMcpStatus = (): McpServiceStatus => ({
+  enabled: false,
+  running: false,
+  state: 'disabled',
+  host: '127.0.0.1',
+  port: 0,
+  endpoint: '',
+  authenticated: false,
+  scopes: [],
+  error: '当前环境不是 Blossom 桌面客户端',
+  storageSecurity: 'unavailable'
+})
+
+/** 获取本机 AI 工具接入服务状态。 */
+export const mcpGetStatus = async (): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpGetStatus()
+}
+
+/** 开启或关闭本机 AI 工具接入服务。 */
+export const mcpSetEnabled = async (enabled: boolean): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpSetEnabled(enabled)
+}
+
+/** 修改 AI 工具接入服务监听端口。 */
+export const mcpSetPort = async (port: number): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpSetPort(port)
+}
+
+/** 轮换本机服务凭证。明文凭证不会返回到 renderer。 */
+export const mcpRotateToken = async (): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpRotateToken()
+}
+
+/** 由主进程将连接配置直接写入系统剪贴板。 */
+export const mcpCopyConfig = async (kind: 'http' | 'stdio' = 'stdio'): Promise<{ copied: boolean }> => {
+  if (!isElectron()) return { copied: false }
+  return window.electronAPI.mcpCopyConfig(kind)
+}
+
+/** 将当前登录快照同步给主进程，仅通过受限 IPC 传输。 */
+export const mcpSyncAuth = async (auth: McpAuthSnapshot): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpSyncAuth(auth)
+}
+
+/** 清除主进程中的登录快照。 */
+export const mcpClearAuth = async (): Promise<McpServiceStatus> => {
+  if (!isElectron()) return unavailableMcpStatus()
+  return window.electronAPI.mcpClearAuth()
+}
+
 /** 打开控制台, 会在打开和关闭之间切换 */
 export const openDevTools = () => {
   window.electronAPI.openDevTools()

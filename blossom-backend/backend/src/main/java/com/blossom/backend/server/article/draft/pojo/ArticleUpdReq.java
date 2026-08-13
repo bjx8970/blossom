@@ -27,6 +27,8 @@ public class ArticleUpdReq extends AbstractPOJO implements Serializable {
     @Min(value = 0, message = "[文章ID] 不能小于0")
     @NotNull(message = "[文章ID] 为必填项")
     private Long id;
+    /** 期望修订号 */
+    private Long expectedRevision;
     /**
      * 文件夹ID
      */

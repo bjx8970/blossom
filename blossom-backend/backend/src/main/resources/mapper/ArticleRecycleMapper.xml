@@ -17,6 +17,7 @@
                    likes,
                    words,
                    version,
+                   revision,
                    color,
                    markdown,
                    cre_time,
@@ -24,7 +25,7 @@
                    now(),
                    user_id
               from blossom_article
-             where id = #{id}
+             where id = #{id} and user_id = #{userId}
         );
     </insert>
 
@@ -39,6 +40,11 @@
     <!--  -->
     <insert id="restore">
         INSERT INTO blossom_article (
+            id, pid, name, icon, tags, sort, cover, describes,
+            star_status, open_status, open_version, pv, uv, likes, words,
+            version, revision, color, toc, markdown, html, cre_time, upd_time,
+            user_id, upd_markdown_time
+        ) (
             select id,
                    #{pid},
                    name,
@@ -55,16 +61,17 @@
                    likes,
                    words,
                    version,
+                   revision,
                    color,
-                   '',
+                   #{toc},
                    markdown,
-                   '',
+                   #{html},
                    cre_time,
                    now(),
                    user_id,
                    now()
               from blossom_article_recycle
-             where id = #{id})
+             where id = #{id} and user_id = #{userId})
     </insert>
 
     <delete id="delByUserId">

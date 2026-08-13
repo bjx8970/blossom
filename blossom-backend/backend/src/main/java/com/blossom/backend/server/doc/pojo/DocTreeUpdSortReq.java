@@ -54,6 +54,10 @@ public class DocTreeUpdSortReq {
          */
         private Long i;
         /**
+         * 文章节点的期望修订号。文件夹节点无需提供。
+         */
+        private Long r;
+        /**
          * 父id
          */
         private Long p;

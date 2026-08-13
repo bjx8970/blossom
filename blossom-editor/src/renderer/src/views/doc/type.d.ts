@@ -14,6 +14,8 @@ declare interface DocTree {
   o: number
   /** 版本有差异, 公开文章才会有此项 */
   vd?: number | null
+  /** 内容修订号，用于文章标题、标签、移动等聚合写入的乐观锁。 */
+  r?: number
   /** Tags */
   t: string[]
   /** 排序 */
@@ -51,6 +53,8 @@ declare interface DocInfo {
   likes?: number
   words?: number
   version?: number
+  /** 内容修订号，用于跨客户端乐观锁；旧服务端可回退使用 version。 */
+  revision?: number
   storePath?: string
   subjectWords?: string
   subjectUpdTime?: string
@@ -84,10 +88,3 @@ declare type RightMenuLevel2 = { top: string }
 
 /** 快捷标签 */
 declare type QuickTag = { name: string; selected: boolean }
-
-/**
- * 在 window 注册内联事件
- */
-declare interface Window {
-  onHtmlEventDispatch: any
-}

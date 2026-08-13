@@ -55,11 +55,14 @@ public class RequestLogFilter {
                 while (headerNames.hasMoreElements()) {
                     String key = headerNames.nextElement();
                     String value = req.getHeader(key);
-                    headers.put(key, value);
+                    headers.put(key, isSensitiveHeader(key) ? "[REDACTED]" : value);
                 }
 
                 String requestBody = "";
-                if (request.getContentType() != null && request.getContentType().contains("application/json")) {
+                if (isAiRequest(req)) {
+                    // AI 写接口可能携带完整 Markdown，任何日志级别都不得记录正文或设备凭证。
+                    requestBody = "[REDACTED AI REQUEST BODY]";
+                } else if (request.getContentType() != null && request.getContentType().contains("application/json")) {
                     try {
                         requestBody = req.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
                     } catch (Exception e) {
@@ -80,5 +83,22 @@ public class RequestLogFilter {
         } catch (Exception e) {
             log.warn("输出日志错误:" + e.getMessage());
         }
+    }
+
+    private boolean isAiRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (uri != null && StrUtil.isNotEmpty(contextPath) && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
+        return uri != null && (uri.startsWith("/api/ai/") || uri.startsWith("/ai/"));
+    }
+
+    private boolean isSensitiveHeader(String headerName) {
+        return "authorization".equalsIgnoreCase(headerName)
+                || "proxy-authorization".equalsIgnoreCase(headerName)
+                || "cookie".equalsIgnoreCase(headerName)
+                || "set-cookie".equalsIgnoreCase(headerName)
+                || "x-api-key".equalsIgnoreCase(headerName);
     }
 }

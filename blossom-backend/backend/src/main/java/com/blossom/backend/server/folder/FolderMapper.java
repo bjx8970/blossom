@@ -23,22 +23,22 @@ public interface FolderMapper extends BaseMapper<FolderEntity> {
     /**
      * 递归获取传入ID的所有的父文件夹
      */
-    List<FolderEntity> recursiveToParent(@Param("ids") List<Long> ids);
+    List<FolderEntity> recursiveToParent(@Param("ids") List<Long> ids, @Param("userId") Long userId);
 
     /**
      * 递归获取传入ID的所有的子文件夹
      */
-    List<FolderEntity> recursiveToChildren(@Param("ids") List<Long> ids);
+    List<FolderEntity> recursiveToChildren(@Param("ids") List<Long> ids, @Param("userId") Long userId);
 
     /**
      * 根据ID修改
      */
-    void updById(FolderEntity entity);
+    int updById(FolderEntity entity);
 
     /**
      * 根据ID集合修改
      */
-    void updByIds(FolderEntity entity);
+    int updByIds(FolderEntity entity);
 
     /**
      * 删除文件夹
