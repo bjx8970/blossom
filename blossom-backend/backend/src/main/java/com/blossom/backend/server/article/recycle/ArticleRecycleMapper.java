@@ -36,8 +36,7 @@ public interface ArticleRecycleMapper extends BaseMapper<ArticleRecycleEntity> {
      * @param id  文章ID
      * @param pid 文章的父ID
      */
-    int restore(@Param("id") Long id, @Param("pid") Long pid, @Param("userId") Long userId,
-                @Param("html") String html, @Param("toc") String toc, @Param("words") Integer words);
+    int restore(@Param("id") Long id, @Param("pid") Long pid, @Param("userId") Long userId);
 
     /**
      * 删除文章回收站

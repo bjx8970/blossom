@@ -659,6 +659,7 @@ const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> =>
   const savingArticle = targetArticle
   const localMarkdown = cmw.getDocString()
   const expectedRevision = savingArticle.revision ?? savingArticle.version ?? 0
+  await parseToc()
   articleChanged = false
   const data = {
     id: savingArticle.id,
@@ -666,6 +667,7 @@ const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> =>
     markdown: localMarkdown,
     expectedRevision,
     html: sanitizeArticleHtml(PreviewRef.value?.innerHTML || articleHtml.value),
+    toc: JSON.stringify(articleToc.value),
     references: articleImg.value.concat(articleLink.value).map((item) => {
       let refer: ArticleReference = { targetId: '', targetName: '', targetUrl: '', type: 10 }
       Object.assign(refer, item)
@@ -913,7 +915,7 @@ const clearTocAndImg = () => {
 }
 
 const parseToc = async () => {
-  parseTocAsync(PreviewRef.value).then((tocs) => (articleToc.value = tocs))
+  articleToc.value = await parseTocAsync(PreviewRef.value)
 }
 
 useDraggable(TocRef, TocTitleRef)

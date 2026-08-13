@@ -560,6 +560,7 @@ const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> =>
   }
   const savingArticle = curArticle.value!
   const expectedRevision = savingArticle.revision ?? savingArticle.version ?? 0
+  await parseToc()
   articleChanged = false
   const data = {
     id: savingArticle.id,
@@ -567,6 +568,7 @@ const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> =>
     markdown: cmw.getDocString(),
     expectedRevision,
     html: sanitizeArticleHtml(PreviewRef.value?.innerHTML || articleHtml.value),
+    toc: JSON.stringify(articleToc.value),
     references: articleImg.value.concat(articleLink.value)
   }
   contentSaveInProgress = true
@@ -812,7 +814,7 @@ const clearTocAndImg = () => {
 }
 
 const parseToc = async () => {
-  parseTocAsync(PreviewRef.value).then((tocs) => (articleToc.value = tocs))
+  articleToc.value = await parseTocAsync(PreviewRef.value)
 }
 
 useDraggable(TocRef, TocTitleRef)

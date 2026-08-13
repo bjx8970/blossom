@@ -8,7 +8,6 @@ import com.blossom.backend.base.param.ParamService;
 import com.blossom.backend.base.param.pojo.ParamEntity;
 import com.blossom.backend.base.search.EnableIndex;
 import com.blossom.backend.base.search.message.IndexMsgTypeEnum;
-import com.blossom.backend.server.ai.AiMarkdownService;
 import com.blossom.backend.server.article.recycle.pojo.ArticleRecycleEntity;
 import com.blossom.backend.server.article.reference.ArticleReferenceService;
 import com.blossom.backend.server.folder.FolderService;
@@ -38,7 +37,6 @@ public class ArticleRecycleService extends ServiceImpl<ArticleRecycleMapper, Art
     private final FolderService folderService;
     private final ParamService paramService;
     private final ArticleReferenceService referenceService;
-    private final AiMarkdownService markdownService;
 
 
     /**
@@ -71,21 +69,18 @@ public class ArticleRecycleService extends ServiceImpl<ArticleRecycleMapper, Art
     public void restore(Long userId, Long id) {
         ArticleRecycleEntity article = selectById(id, userId);
         XzException404.throwBy(article == null, "回收站文章不存在或无权操作");
-        AiMarkdownService.Derived derived = markdownService.derive(article.getMarkdown());
         FolderEntity folder = folderService.selectById(article.getPid(), userId);
         if (ObjUtil.isNull(folder)) {
-            XzException404.throwBy(baseMapper.restore(id, 0L, userId, derived.getHtml(), derived.getToc(),
-                    com.blossom.backend.server.utils.ArticleUtil.statWords(article.getMarkdown())) != 1, "回收站文章还原失败");
+            XzException404.throwBy(baseMapper.restore(id, 0L, userId) != 1, "回收站文章还原失败");
         } else {
-            XzException404.throwBy(baseMapper.restore(id, folder.getId(), userId, derived.getHtml(), derived.getToc(),
-                    com.blossom.backend.server.utils.ArticleUtil.statWords(article.getMarkdown())) != 1, "回收站文章还原失败");
+            XzException404.throwBy(baseMapper.restore(id, folder.getId(), userId) != 1, "回收站文章还原失败");
         }
         int affected = baseMapper.delete(new LambdaQueryWrapper<ArticleRecycleEntity>()
                 .eq(ArticleRecycleEntity::getId, id)
                 .eq(ArticleRecycleEntity::getUserId, userId));
         XzException404.throwBy(affected != 1, "回收站文章不存在或无权操作");
-        referenceService.bind(userId, id, article.getName(), derived.getReferences());
-        // 将被动引用中的未知文章名修改为正常文章名
+        // 主动引用在删除文章时一并删除，恢复时无法从旧回收数据重建；保留历史行为，
+        // 至少把其他文章指向本文的未知双链恢复为正常名称。
         referenceService.updateToKnown(userId, id, article.getName());
     }
 

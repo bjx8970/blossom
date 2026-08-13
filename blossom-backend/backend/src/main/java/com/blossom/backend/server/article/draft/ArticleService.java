@@ -7,7 +7,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.blossom.backend.base.search.EnableIndex;
 import com.blossom.backend.base.search.message.IndexMsgTypeEnum;
-import com.blossom.backend.server.ai.AiMarkdownService;
 import com.blossom.backend.server.article.TagEnum;
 import com.blossom.backend.server.article.draft.pojo.ArticleEntity;
 import com.blossom.backend.server.article.draft.pojo.ArticleQueryReq;
@@ -47,7 +46,6 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     private ArticleLogService logService;
     private ArticleOpenMapper openMapper;
     private ArticleRecycleMapper recycleMapper;
-    private AiMarkdownService markdownService;
     private FolderService folderService;
 
     @Autowired
@@ -73,11 +71,6 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Autowired
     public void setOpenMapper(ArticleOpenMapper openMapper) {
         this.openMapper = openMapper;
-    }
-
-    @Autowired
-    public void setMarkdownService(AiMarkdownService markdownService) {
-        this.markdownService = markdownService;
     }
 
     @Autowired
@@ -173,21 +166,25 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Transactional(rollbackFor = Exception.class)
     public ArticleEntity insert(ArticleEntity req) {
         validateArticleFolder(req.getPid(), req.getUserId());
-        if (req.getMarkdown() != null) {
-            AiMarkdownService.Derived derived = markdownService.derive(req.getMarkdown());
-            req.setHtml(derived.getHtml());
-            req.setToc(derived.getToc());
-            req.setReferences(derived.getReferences());
-            req.setWords(ArticleUtil.statWords(req.getMarkdown()));
-        }
         int affected = baseMapper.insert(req);
         if (affected != 1) {
             throw new XzException("ARTICLE-INSERT-FAILED", "文章创建失败");
         }
+        return req;
+    }
+
+    /**
+     * AI/import 等受信任服务端命令可显式提交已经派生好的正文快照。
+     * 普通桌面创建仍只创建元数据，随后由桌面扩展渲染器调用正文保存接口。
+     */
+    @EnableIndex(type = IndexMsgTypeEnum.ADD, id = "#req.id")
+    @Transactional(rollbackFor = Exception.class)
+    public ArticleEntity insertWithDerivedContent(ArticleEntity req) {
+        ArticleEntity inserted = insert(req);
         if (req.getMarkdown() != null) {
             referenceService.bind(req.getUserId(), req.getId(), req.getName(), req.getReferences());
         }
-        return req;
+        return inserted;
     }
 
     /**
@@ -246,10 +243,15 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
         if (req.getMarkdown() == null) {
             throw new XzException("ARTICLE-MARKDOWN-REQUIRED", "markdown 正文不能为空");
         }
-        AiMarkdownService.Derived derived = markdownService.derive(req.getMarkdown());
-        req.setHtml(derived.getHtml());
-        req.setToc(derived.getToc());
-        req.setReferences(derived.getReferences());
+        // 普通桌面端使用 Blossom 自有 marked 扩展渲染 KaTeX、Mermaid、Markmap、
+        // Bilibili、双链和图片样式。这里保存客户端已经净化的派生结果，不能再用
+        // AI 的安全 CommonMark 基线覆盖，否则公开文章会丢失现有渲染能力。
+        if (req.getHtml() == null) {
+            throw new XzException("ARTICLE-HTML-REQUIRED", "桌面端保存必须提交已净化的 html");
+        }
+        if (req.getToc() == null) {
+            throw new XzException("ARTICLE-TOC-REQUIRED", "桌面端保存必须提交 toc");
+        }
         req.setWords(ArticleUtil.statWords(req.getMarkdown()));
         req.setUpdMarkdownTime(DateUtils.date());
         int affected = baseMapper.updContentById(req);

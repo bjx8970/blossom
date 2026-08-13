@@ -85,6 +85,10 @@ public class ArticleRecycleEntity extends AbstractPOJO implements Serializable {
      * Markdown 内容
      */
     private String markdown;
+    /** 删除时保存的 Blossom 扩展 HTML，恢复时原样还原。 */
+    private String html;
+    /** 删除时保存的目录 JSON，恢复时原样还原。 */
+    private String toc;
     /**
      * 版本
      */

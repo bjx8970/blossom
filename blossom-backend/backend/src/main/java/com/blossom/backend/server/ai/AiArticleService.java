@@ -178,7 +178,8 @@ public class AiArticleService {
         article.setRevision(1L);
         article.setUpdMarkdownTime(DateUtils.date());
         article.setUserId(userId);
-        articleService.insert(article);
+        article.setReferences(derived.getReferences());
+        articleService.insertWithDerivedContent(article);
         // version=0 表示创建前的空正文；新建正文自身从 contentVersion=1 开始。
         logService.insertSync(article.getId(), 0, "");
         if (mapper.updateIdempotencyResource(reservation.getIdempotencyId(), tokenId, article.getId()) != 1) {

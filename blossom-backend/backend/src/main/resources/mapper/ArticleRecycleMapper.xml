@@ -4,6 +4,9 @@
     <!-- 文章保存进回收站 -->
     <insert id="save">
         insert into blossom_article_recycle (
+            id, pid, name, icon, tags, sort, cover, describes, pv, uv, likes, words,
+            version, revision, color, markdown, html, toc, cre_time, upd_time, del_time, user_id
+        ) (
             select id,
                    pid,
                    name,
@@ -20,6 +23,8 @@
                    revision,
                    color,
                    markdown,
+                   html,
+                   toc,
                    cre_time,
                    cre_time,
                    now(),
@@ -63,9 +68,9 @@
                    version,
                    revision,
                    color,
-                   #{toc},
+                   toc,
                    markdown,
-                   #{html},
+                   html,
                    cre_time,
                    now(),
                    user_id,

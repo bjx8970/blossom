@@ -472,6 +472,8 @@ CREATE TABLE IF NOT EXISTS `blossom_article_recycle`
     `revision`  bigint                                                 NOT NULL DEFAULT 0 COMMENT '删除时的聚合修订号',
     `color`     varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '颜色',
     `markdown`  mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT 'Markdown 内容',
+    `html`      mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT '删除时保存的 Blossom 扩展 Html',
+    `toc`       mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT '删除时保存的目录 JSON',
     `cre_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `upd_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     `del_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '删除时间',
@@ -490,6 +492,13 @@ update blossom_article_recycle
    set revision = version
  where revision = 0
    and version <> 0;
+
+-- since 1.18.0: 恢复文章时保留桌面渲染器生成的扩展 HTML/TOC，禁止 CommonMark 降级覆盖。
+alter table blossom_article_recycle
+    add column html mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '删除时保存的 Blossom 扩展 Html' after markdown;
+
+alter table blossom_article_recycle
+    add column toc mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '删除时保存的目录 JSON' after html;
 
 -- ----------------------------
 -- Table structure for blossom_article_open
