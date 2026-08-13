@@ -2,6 +2,88 @@ import { defaultRequest as rq } from './request'
 import type { R } from './request'
 import { AxiosRequestConfig } from 'axios'
 
+export interface ArticleMutationRes {
+  id?: string | number
+  version?: number
+  revision?: number
+  words?: number
+  updTime?: string
+}
+
+export interface ArticleRevisionedReq {
+  id: string | number
+  expectedRevision: number
+}
+
+export interface ArticleUpdContentReq extends ArticleRevisionedReq {
+  name: string
+  markdown: string
+  /** 兼容旧服务端；新服务端以 markdown 为正文事实来源。 */
+  html?: string
+  /** 兼容旧服务端；引用关系由服务端从 markdown 重建。 */
+  references?: object[]
+}
+
+export type ArticleMetadataUpdReq = ArticleRevisionedReq & Record<string, unknown>
+
+const articleRevisionCache = new Map<string, number>()
+let articleMutationTail: Promise<unknown> = Promise.resolve()
+
+const toRevision = (value: unknown): number | undefined => {
+  const revision = Number(value)
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : undefined
+}
+
+/** 记录文章最新修订号，供同一 renderer 内的串行写入衔接使用。 */
+export const rememberArticleRevision = (id: string | number, revision: unknown) => {
+  const nextRevision = toRevision(revision)
+  if (nextRevision === undefined) return
+  const key = String(id)
+  const currentRevision = articleRevisionCache.get(key)
+  if (currentRevision === undefined || nextRevision > currentRevision) {
+    articleRevisionCache.set(key, nextRevision)
+  }
+}
+
+export const getKnownArticleRevision = (id: string | number): number | undefined => articleRevisionCache.get(String(id))
+
+export const clearArticleRevisionCache = () => articleRevisionCache.clear()
+
+const serializeArticleMutation = <T>(mutation: () => Promise<T>): Promise<T> => {
+  const result = articleMutationTail.catch(() => undefined).then(mutation)
+  articleMutationTail = result.then(
+    () => undefined,
+    () => undefined
+  )
+  return result
+}
+
+const postArticleMutation = <T>(url: string, data: ArticleRevisionedReq & object): Promise<R<T>> => {
+  return serializeArticleMutation(async () => {
+    const requestedRevision = toRevision(data.expectedRevision)
+    if (requestedRevision === undefined) {
+      throw new Error('保存文章需要有效的 expectedRevision，请先重新加载文章')
+    }
+    // 显式修订号代表调用方这份内容的真实基线，绝不能被缓存“升级”，否则旧正文可能静默覆盖新版本。
+    const expectedRevision = requestedRevision
+    const payload = { ...data, expectedRevision }
+    const resp = await rq.post<T>(url, payload)
+    const responseData = resp.data as ArticleMutationRes | undefined
+    const nextRevision = toRevision(responseData?.revision) ?? expectedRevision + 1
+    rememberArticleRevision(data.id, nextRevision)
+    if (
+      responseData !== null &&
+      typeof responseData === 'object' &&
+      !Array.isArray(responseData) &&
+      responseData.revision === undefined &&
+      nextRevision !== undefined
+    ) {
+      responseData.revision = nextRevision
+    }
+    return resp
+  })
+}
+
 //#region ====================================================< sys >=======================================================
 
 /**
@@ -100,7 +182,18 @@ export const docTreeApi = (params?: object): Promise<R<any>> => {
  * @returns
  */
 export const docUpdSortApi = (data: object): Promise<R<any>> => {
-  return rq.post<R<any>>('/doc/upd/sort', data)
+  return serializeArticleMutation(() =>
+    rq.post<any>('/doc/upd/sort', data).then((resp) => {
+      const rememberTreeRevisions = (docs: any[]) => {
+        docs?.forEach((doc) => {
+          if (doc?.ty === 3 && doc?.i !== undefined) rememberArticleRevision(doc.i, doc.r)
+          if (Array.isArray(doc?.children)) rememberTreeRevisions(doc.children)
+        })
+      }
+      if (Array.isArray(resp.data)) rememberTreeRevisions(resp.data)
+      return resp
+    })
+  )
 }
 
 //#endregion
@@ -207,7 +300,12 @@ export const articleListApi = (params?: object): Promise<R<any>> => {
  * @returns
  */
 export const articleInfoApi = (params?: object): Promise<R<any>> => {
-  return rq.get<R<any>>('/article/info', { params })
+  return rq.get<any>('/article/info', { params }).then((resp) => {
+    if (resp.data?.id !== undefined) {
+      rememberArticleRevision(resp.data.id, resp.data.revision ?? resp.data.version)
+    }
+    return resp
+  })
 }
 
 /**
@@ -224,8 +322,8 @@ export const articleAddApi = (data?: object): Promise<R<any>> => {
  * @param data { id: 0, pid: 0, name: "", icon: "", tags: "", sort: 0, cover: "", describes: ""}
  * @returns
  */
-export const articleUpdApi = (data?: object): Promise<R<any>> => {
-  return rq.post<R<any>>('/article/upd', data)
+export const articleUpdApi = (data: ArticleMetadataUpdReq): Promise<R<ArticleMutationRes>> => {
+  return postArticleMutation<ArticleMutationRes>('/article/upd', data)
 }
 
 /**
@@ -237,8 +335,8 @@ export const articleUpdApi = (data?: object): Promise<R<any>> => {
  * }
  * @returns
  */
-export const articleUpdContentApi = (data?: object): Promise<R<any>> => {
-  return rq.post<R<any>>('/article/upd/content', data)
+export const articleUpdContentApi = (data: ArticleUpdContentReq): Promise<R<ArticleMutationRes>> => {
+  return postArticleMutation<ArticleMutationRes>('/article/upd/content', data)
 }
 
 /**
@@ -249,8 +347,8 @@ export const articleUpdContentApi = (data?: object): Promise<R<any>> => {
  * }
  * @returns
  */
-export const articleUpdNameApi = (data?: object): Promise<R<any>> => {
-  return rq.post<R<any>>('/article/upd/name', data)
+export const articleUpdNameApi = (data: ArticleMetadataUpdReq): Promise<R<ArticleMutationRes>> => {
+  return postArticleMutation<ArticleMutationRes>('/article/upd/name', data)
 }
 
 /**
@@ -261,8 +359,8 @@ export const articleUpdNameApi = (data?: object): Promise<R<any>> => {
  * }
  * @returns
  */
-export const articleUpdTagApi = (data?: object): Promise<R<any>> => {
-  return rq.post<R<any>>('/article/upd/tag', data)
+export const articleUpdTagApi = (data: ArticleMetadataUpdReq): Promise<R<any>> => {
+  return postArticleMutation<any>('/article/upd/tag', data)
 }
 
 /**

@@ -120,7 +120,7 @@
           <span v-show="tocsExpand" style="font-size: 10px">({{ keymaps.hideToc }} 可隐藏)</span>
         </div>
         <div class="toc-content" v-show="tocsExpand">
-          <div v-for="toc in articleToc" :key="toc.id" :class="[toc.clazz]" @click="toScroll(toc.id)" v-html="toc.content"></div>
+          <div v-for="toc in articleToc" :key="toc.id" :class="[toc.clazz]" @click="toScroll(toc.id)">{{ toc.content }}</div>
         </div>
         <div class="img-title">
           引用图片
@@ -198,7 +198,7 @@ import type { UploadProps, UploadRawFile } from 'element-plus'
 import { useUserStore } from '@renderer/stores/user'
 import { useServerStore } from '@renderer/stores/server'
 import { useConfigStore } from '@renderer/stores/config'
-import { articleInfoApi, articleUpdContentApi, uploadFileApiUrl } from '@renderer/api/blossom'
+import { articleInfoApi, articleUpdContentApi, getKnownArticleRevision, uploadFileApiUrl } from '@renderer/api/blossom'
 // utils
 import { Local } from '@renderer/assets/utils/storage'
 import { isBlank, isNull } from '@renderer/assets/utils/obj'
@@ -233,6 +233,7 @@ import marked, { renderBlockquote, renderCode, renderCodespan, renderHeading, re
 import { EPScroll } from './scripts/editor-preview-scroll'
 import { useArticleHtmlEvent } from './scripts/article-html-event'
 import { shallowRef } from 'vue'
+import { sanitizeArticleHtml } from './scripts/sanitize-html'
 import { keymaps } from './scripts/editor-tools'
 
 //#region -- mounted
@@ -466,6 +467,7 @@ const authSaveMs = 5 * 60 * 1000
 let articleParseing = false
 // 编辑器内容是否有变更, 防止在没有变更时频繁保存导致请求接口和版本号的无意义变更, 如果为 true, 则文章允许保存, 为 false 时跳过保存
 let articleChanged = false
+let contentSaveInProgress = false
 // 上次保存时间
 let lastSaveTime: number = new Date().getTime()
 // 自动保存定时器
@@ -486,15 +488,21 @@ provide(provideKeyCurArticleInfo, curArticle)
  */
 const clickCurDoc = async (tree: DocTree) => {
   let doc: DocInfo = treeToInfo(tree)
-  curDoc.value = doc
   // 如果选中的是文章, 则查询文章详情, 用于在编辑器中显示以及注入
   if (doc.type == 3) {
     // 重复点击同一个, 不会多次查询
     if (isArticle(curArticle.value) && curArticle.value!.id == doc.id) {
+      curDoc.value = doc
       return
     }
     editorLoadingTimeout = setTimeout(() => (editorLoading.value = true), 100)
-    await saveCurArticleContent(true)
+    const saved = await saveCurArticleContent(true)
+    if (!saved) {
+      if (editorLoadingTimeout) clearTimeout(editorLoadingTimeout)
+      editorLoading.value = false
+      return
+    }
+    curDoc.value = doc
     clearTocAndImg()
     await articleInfoApi({ id: doc.id, showToc: false, showMarkdown: true, showHtml: false })
       .then((resp) => {
@@ -518,6 +526,8 @@ const clickCurDoc = async (tree: DocTree) => {
     nextTick(() => {
       scrollTopReset()
     })
+  } else {
+    curDoc.value = doc
   }
 }
 /**
@@ -525,9 +535,12 @@ const clickCurDoc = async (tree: DocTree) => {
  *
  * @param auto 是否为自动保存, 如果是自动保存, 则不弹出保存成功的提示框, 避免在非用户主动操作下弹框
  */
-const saveCurArticleContent = async (auto: boolean = false) => {
+const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> => {
   if (!isArticle(curArticle.value)) {
-    return
+    return true
+  }
+  while (contentSaveInProgress) {
+    await sleep(50)
   }
   const saveCallback = () => {
     if (!auto) {
@@ -538,36 +551,48 @@ const saveCurArticleContent = async (auto: boolean = false) => {
   if (!articleChanged) {
     console.info('%c文档内容无变化, 无需保存', 'background:#AD8CF2;color:#fff;')
     saveCallback()
-    return
+    return true
   }
   // 如果文档正在解析中, 则等待解析完成
   while (articleParseing) {
     console.log('检测到正在解析, 等待解析完成')
     await sleep(100)
   }
+  const savingArticle = curArticle.value!
+  const expectedRevision = savingArticle.revision ?? savingArticle.version ?? 0
+  await parseToc()
   articleChanged = false
-  let data = {
-    id: curArticle.value!.id,
-    name: curArticle.value!.name,
+  const data = {
+    id: savingArticle.id,
+    name: savingArticle.name,
     markdown: cmw.getDocString(),
-    html: PreviewRef.value.innerHTML,
+    expectedRevision,
+    html: sanitizeArticleHtml(PreviewRef.value?.innerHTML || articleHtml.value),
+    toc: JSON.stringify(articleToc.value),
     references: articleImg.value.concat(articleLink.value)
   }
-  await articleUpdContentApi(data)
-    .then((resp) => {
+  contentSaveInProgress = true
+  try {
+    const resp = await articleUpdContentApi(data)
+    if (curArticle.value && curArticle.value.id === savingArticle.id) {
       lastSaveTime = new Date().getTime()
-      curArticle.value!.words = resp.data.words as number
-      curArticle.value!.updTime = resp.data.updTime as string
-      if (curArticle.value!.version != undefined) {
-        curArticle.value!.version = curArticle.value!.version + 1
-      } else {
-        curArticle.value!.version = 1
-      }
-      saveCallback()
-    })
-    .catch(() => {
-      articleChanged = true
-    })
+      if (resp.data?.words !== undefined) curArticle.value.words = resp.data.words
+      if (resp.data?.updTime !== undefined) curArticle.value.updTime = resp.data.updTime
+      curArticle.value.revision = resp.data?.revision ?? getKnownArticleRevision(savingArticle.id) ?? expectedRevision + 1
+      curArticle.value.version = resp.data?.version ?? (curArticle.value.version ?? 0) + 1
+    }
+    saveCallback()
+    return true
+  } catch (error: any) {
+    articleChanged = true
+    const code = error?.data?.code ?? error?.response?.data?.code
+    if (code === 'ARTICLE-CONFLICT' || error?.status === 409 || error?.response?.status === 409) {
+      ElMessage.warning('文章已在其他客户端被修改，本地内容仍保留；请复制本地 Markdown 后刷新最新版。')
+    }
+    return false
+  } finally {
+    contentSaveInProgress = false
+  }
 }
 /**
  * 初始化自动保存定时器
@@ -725,7 +750,7 @@ const parse = () => {
   marked
     .parse(mdContent, { async: true })
     .then((content: string) => {
-      articleHtml.value = content
+      articleHtml.value = sanitizeArticleHtml(content)
       renderInterval.value = Date.now() - begin
       articleParseing = false
     })
@@ -789,7 +814,7 @@ const clearTocAndImg = () => {
 }
 
 const parseToc = async () => {
-  parseTocAsync(PreviewRef.value).then((tocs) => (articleToc.value = tocs))
+  articleToc.value = await parseTocAsync(PreviewRef.value)
 }
 
 useDraggable(TocRef, TocTitleRef)

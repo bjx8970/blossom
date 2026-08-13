@@ -1,6 +1,7 @@
 package com.blossom.backend.server.article.log;
 
 import cn.hutool.core.collection.CollUtil;
+import com.blossom.backend.base.auth.AuthContext;
 import com.blossom.backend.server.article.log.pojo.ArticleLogEntity;
 import com.blossom.backend.server.article.log.pojo.ArticleLogRes;
 import com.blossom.common.base.pojo.R;
@@ -35,7 +36,7 @@ public class ArticleLogController {
     @GetMapping
     public R<List<ArticleLogRes>> open(@RequestParam("articleId") Long articleId) {
         List<ArticleLogRes> result = new ArrayList<>();
-        List<ArticleLogEntity> all = baseService.listAll(articleId);
+        List<ArticleLogEntity> all = baseService.listAll(articleId, AuthContext.getUserId());
         if (CollUtil.isNotEmpty(all)) {
             for (ArticleLogEntity log : all) {
                 ArticleLogRes res = new ArticleLogRes();
@@ -55,6 +56,6 @@ public class ArticleLogController {
      */
     @GetMapping("content")
     public R<String> content(@RequestParam("id") Long id) {
-        return R.ok(baseService.content(id));
+        return R.ok(baseService.content(id, AuthContext.getUserId()));
     }
 }

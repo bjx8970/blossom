@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.blossom.backend.server.ai.AiMapper">
+
+    <select id="listDeviceTokens" resultType="com.blossom.backend.server.ai.AiEntities$DeviceToken">
+        select id, user_id, device_id, name, token_prefix, scopes, expire_time, revoked_time,
+               last_used_time, cre_time, upd_time
+          from blossom_ai_device_token
+         where user_id = #{userId}
+         order by id desc
+    </select>
+
+    <select id="selectDeviceToken" resultType="com.blossom.backend.server.ai.AiEntities$DeviceToken">
+        select id, user_id, device_id, name, token_prefix, token_hash, scopes, expire_time, revoked_time,
+               last_used_time, cre_time, upd_time
+          from blossom_ai_device_token
+         where id = #{id} and user_id = #{userId}
+         limit 1
+    </select>
+
+    <select id="selectDeviceTokenByDevice" resultType="com.blossom.backend.server.ai.AiEntities$DeviceToken">
+        select id, user_id, device_id, name, token_prefix, token_hash, scopes, expire_time, revoked_time,
+               last_used_time, cre_time, upd_time
+          from blossom_ai_device_token
+         where device_id = #{deviceId} and user_id = #{userId}
+         limit 1
+    </select>
+
+    <select id="selectPrincipalByDevice" resultType="com.blossom.backend.server.ai.AiEntities$TokenPrincipal">
+        select t.id, t.user_id, t.device_id, t.name, t.token_prefix, t.token_hash, t.scopes,
+               t.expire_time, t.revoked_time, t.last_used_time, t.cre_time, t.upd_time,
+               u.username, u.type as user_type, u.del_time as user_del_time
+          from blossom_ai_device_token t
+          join base_user u on u.id = t.user_id
+         where t.device_id = #{deviceId} and t.user_id = #{userId}
+         limit 1
+    </select>
+
+    <insert id="insertDeviceToken" useGeneratedKeys="true" keyProperty="id">
+        insert into blossom_ai_device_token
+            (user_id, device_id, name, token_prefix, token_hash, scopes, expire_time)
+        values
+            (#{userId}, #{deviceId}, #{name}, #{tokenPrefix}, #{tokenHash}, #{scopes}, #{expireTime})
+    </insert>
+
+    <update id="rotateDeviceToken">
+        update blossom_ai_device_token
+           set name = #{name}, token_prefix = #{tokenPrefix}, token_hash = #{tokenHash},
+               scopes = #{scopes}, expire_time = #{expireTime}, revoked_time = null,
+               last_used_time = null, upd_time = now()
+         where id = #{id} and user_id = #{userId}
+    </update>
+
+    <update id="revokeDeviceToken">
+        update blossom_ai_device_token
+           set revoked_time = now(), upd_time = now()
+         where id = #{id} and user_id = #{userId}
+    </update>
+
+    <update id="touchDeviceToken">
+        update blossom_ai_device_token set last_used_time = now() where id = #{id}
+    </update>
+
+    <select id="listFolders" resultType="com.blossom.backend.server.folder.pojo.FolderEntity">
+        select id, pid, name, sort
+          from blossom_folder
+         where user_id = #{userId} and type = 1
+         order by pid, sort, id
+    </select>
+
+    <select id="countOwnedFolder" resultType="java.lang.Integer">
+        select count(1)
+          from blossom_folder
+         where id = #{id} and user_id = #{userId} and type = 1
+    </select>
+
+    <select id="listArticles" resultType="com.blossom.backend.server.article.draft.pojo.ArticleEntity">
+        select id, pid, name, tags, words, version, revision, cre_time, upd_time
+          from blossom_article
+         where user_id = #{userId}
+        <if test="cursor != null">and id &lt; #{cursor}</if>
+        <if test="folderId != null">and pid = #{folderId}</if>
+        <if test="updatedAfter != null">and upd_time &gt; #{updatedAfter}</if>
+         order by id desc
+         limit #{limit}
+    </select>
+
+    <select id="searchArticles" resultType="com.blossom.backend.server.article.draft.pojo.ArticleEntity">
+        select id, pid, name, tags, words, version, revision, markdown, cre_time, upd_time
+          from blossom_article
+         where user_id = #{userId}
+           and (`name` like concat('%', #{query}, '%')
+                or tags like concat('%', #{query}, '%')
+                or markdown like concat('%', #{query}, '%'))
+        <if test="cursor != null">and id &lt; #{cursor}</if>
+         order by id desc
+         limit #{limit}
+    </select>
+
+    <select id="selectArticle" resultType="com.blossom.backend.server.article.draft.pojo.ArticleEntity">
+        select id, pid, name, tags, words, version, revision, markdown, html, toc,
+               cre_time, upd_time, user_id
+          from blossom_article
+         where id = #{id} and user_id = #{userId}
+         limit 1
+    </select>
+
+    <select id="selectMaxArticleSort" resultType="java.lang.Integer">
+        select ifnull(max(sort), 0)
+          from blossom_article
+         where pid = #{folderId} and user_id = #{userId}
+    </select>
+
+    <update id="updateArticle">
+        update blossom_article
+        <set>
+            <if test="folderId != null">pid = #{folderId},</if>
+            <if test="sort != null">sort = #{sort},</if>
+            <if test="title != null">`name` = #{title},</if>
+            <if test="tags != null">tags = #{tags},</if>
+            <if test="markdown != null">
+                markdown = #{markdown}, html = #{html}, toc = #{toc}, words = #{words},
+                version = version + 1, upd_markdown_time = #{markdownUpdatedAt},
+            </if>
+            revision = revision + 1,
+            upd_time = now()
+        </set>
+         where id = #{id} and user_id = #{userId} and revision = #{expectedRevision}
+    </update>
+
+    <select id="selectIdempotency" resultType="com.blossom.backend.server.ai.AiEntities$Idempotency">
+        select id, user_id, token_id, operation, idempotency_key, request_hash, resource_id, cre_time
+          from blossom_ai_idempotency
+         where token_id = #{tokenId} and operation = #{operation} and idempotency_key = #{idempotencyKey}
+         limit 1
+    </select>
+
+    <insert id="reserveIdempotency" useGeneratedKeys="true" keyProperty="id">
+        insert ignore into blossom_ai_idempotency
+            (user_id, token_id, operation, idempotency_key, request_hash, resource_id)
+        values
+            (#{userId}, #{tokenId}, #{operation}, #{idempotencyKey}, #{requestHash}, #{resourceId})
+    </insert>
+
+    <update id="updateIdempotencyResource">
+        update blossom_ai_idempotency
+           set resource_id = #{resourceId}
+         where id = #{id} and token_id = #{tokenId}
+    </update>
+
+    <delete id="deleteExpiredIdempotency">
+        delete from blossom_ai_idempotency
+         where token_id = #{tokenId} and operation = #{operation} and idempotency_key = #{idempotencyKey}
+           and cre_time &lt; date_sub(now(), interval 24 hour)
+    </delete>
+
+    <delete id="deleteAllExpiredIdempotency">
+        delete from blossom_ai_idempotency where cre_time &lt; date_sub(now(), interval 24 hour)
+    </delete>
+
+    <insert id="insertAudit" useGeneratedKeys="true" keyProperty="id">
+        insert into blossom_ai_audit
+            (user_id, token_id, action, resource_type, resource_id, request_id,
+             before_revision, after_revision, result, error_code, ip)
+        values
+            (#{userId}, #{tokenId}, #{action}, #{resourceType}, #{resourceId}, #{requestId},
+             #{beforeRevision}, #{afterRevision}, #{result}, #{errorCode}, #{ip})
+    </insert>
+
+</mapper>

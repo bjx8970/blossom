@@ -112,6 +112,7 @@ public class DocUtil {
     public static DocTreeRes toDocTree(ArticleEntity article) {
         DocTreeRes tree = new DocTreeRes();
         tree.setI(article.getId());
+        tree.setR(article.getRevision());
         tree.setP(article.getPid());
         tree.setO(article.getOpenStatus());
         tree.setS(article.getSort());

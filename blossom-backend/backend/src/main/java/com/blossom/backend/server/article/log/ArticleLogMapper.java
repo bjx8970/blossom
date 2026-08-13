@@ -19,7 +19,10 @@ public interface ArticleLogMapper extends BaseMapper<ArticleLogEntity> {
      *
      * @param articleId 文章ID
      */
-    List<ArticleLogEntity> listAll(@Param("articleId") Long articleId);
+    List<ArticleLogEntity> listAll(@Param("articleId") Long articleId, @Param("userId") Long userId);
+
+    /** 按日志 ID 查询正文，并校验其文章所有权。 */
+    String selectContent(@Param("id") Long id, @Param("userId") Long userId);
 
     /**
      * 删除文章的记录

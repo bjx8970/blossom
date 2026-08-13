@@ -25,6 +25,10 @@ public class DocTreeRes implements Serializable {
      */
     private Long i;
     /**
+     * 文章修订号。文件夹节点为空。
+     */
+    private Long r;
+    /**
      * 父id
      */
     @JsonInclude

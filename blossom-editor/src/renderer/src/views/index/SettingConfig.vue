@@ -10,6 +10,9 @@
       <el-tab-pane label="博客配置" name="blog" :lazy="true" v-if="userStore.isLogin">
         <div class="tab-content"><ConfigBlog ref="ConfigBlogRef"></ConfigBlog></div>
       </el-tab-pane>
+      <el-tab-pane label="AI 工具接入" name="ai" :lazy="true" v-if="userStore.isLogin">
+        <div class="tab-content"><ConfigAi ref="ConfigAiRef"></ConfigAi></div>
+      </el-tab-pane>
       <el-tab-pane label="修改个人信息" name="userinfo" :lazy="true">
         <div class="tab-content"><ConfigUserinfo ref="ConfigUserinfoRef"></ConfigUserinfo></div>
       </el-tab-pane>
@@ -37,6 +40,7 @@ import ConfigAddUser from './SettingConfigAddUser.vue'
 import ConfigClient from './SettingConfigClient.vue'
 import ConfigServer from './SettingConfigServer.vue'
 import ConfigBlog from './SettingConfigBlog.vue'
+import ConfigAi from './SettingConfigAi.vue'
 import SentinelResources from '@renderer/views/statistic/SentinelResources.vue'
 
 const userStore = useUserStore()
@@ -45,6 +49,7 @@ const curTab = ref('client')
 const ConfigServerRef = ref()
 const ConfigBlogRef = ref()
 const ConfigUserinfoRef = ref()
+const ConfigAiRef = ref()
 
 const handleChange = (name: string) => {
   if (name === 'server') {
@@ -55,6 +60,9 @@ const handleChange = (name: string) => {
   }
   if (name === 'userinfo') {
     nextTick(() => ConfigUserinfoRef.value.reload())
+  }
+  if (name === 'ai') {
+    nextTick(() => ConfigAiRef.value.reload(false))
   }
 }
 </script>

@@ -30,7 +30,8 @@ public interface ArticleReferenceMapper extends BaseMapper<ArticleReferenceEntit
      * @param userId    用户ID
      * @param articleId 文章ID
      */
-    List<ArticleReferenceEntity> listPic(@Param("articleId") Long articleId);
+    List<ArticleReferenceEntity> listPic(@Param("userId") Long userId,
+                                         @Param("articleId") Long articleId);
 
     /**
      * 查询引用关系

@@ -151,7 +151,7 @@
           <span v-show="tocsExpand" style="font-size: 10px">({{ keymaps.hideToc }} 可隐藏)</span>
         </div>
         <div class="toc-content" v-show="tocsExpand">
-          <div v-for="toc in articleToc" :key="toc.id" :class="[toc.clazz]" @click="toScroll(toc.id)" v-html="toc.content"></div>
+          <div v-for="toc in articleToc" :key="toc.id" :class="[toc.clazz]" @click="toScroll(toc.id)">{{ toc.content }}</div>
         </div>
         <div class="img-title">
           引用图片
@@ -218,18 +218,46 @@
         </bl-row>
       </div>
     </Teleport>
+
+    <el-dialog v-model="revisionConflict.show" title="检测到文章更新冲突" width="min(980px, 92vw)" :close-on-click-modal="false">
+      <el-alert
+        title="其他客户端或 AI 工具已修改这篇文章。Blossom 没有覆盖最新版，你的本地 Markdown 仍保留在编辑器中。"
+        type="warning"
+        :closable="false"
+        show-icon />
+      <div class="conflict-actions">
+        <el-button @click="revisionConflict.showDiff = !revisionConflict.showDiff">
+          {{ revisionConflict.showDiff ? '收起差异' : '查看差异' }}
+        </el-button>
+        <el-button @click="copyConflictLocal">复制本地 Markdown</el-button>
+        <el-button type="primary" :loading="revisionConflict.loading" @click="loadConflictLatest">加载服务器最新版</el-button>
+      </div>
+      <div v-if="revisionConflict.showDiff" class="conflict-diff">
+        <div>
+          <div class="conflict-diff-title">本地内容（保留）</div>
+          <el-input :model-value="revisionConflict.localMarkdown" type="textarea" readonly resize="none" :rows="18" />
+        </div>
+        <div>
+          <div class="conflict-diff-title">服务器最新版</div>
+          <el-input :model-value="revisionConflict.latestMarkdown" type="textarea" readonly resize="none" :rows="18" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="revisionConflict.show = false">继续保留本地编辑</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 // vue
 import { ref, computed, provide, onMounted, onBeforeUnmount, onActivated, onDeactivated, defineAsyncComponent, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadProps, UploadRawFile } from 'element-plus'
 import { useUserStore } from '@renderer/stores/user'
 import { useServerStore } from '@renderer/stores/server'
 import { useConfigStore } from '@renderer/stores/config'
-import { articleInfoApi, articleUpdContentApi, uploadFileApiUrl } from '@renderer/api/blossom'
+import { articleInfoApi, articleUpdContentApi, getKnownArticleRevision, uploadFileApiUrl } from '@renderer/api/blossom'
 // utils
 import { Local } from '@renderer/assets/utils/storage'
 import { isBlank, isNull } from '@renderer/assets/utils/obj'
@@ -265,6 +293,7 @@ import { EPScroll } from './scripts/editor-preview-scroll'
 import { useArticleHtmlEvent } from './scripts/article-html-event'
 import { shallowRef } from 'vue'
 import { keymaps } from './scripts/editor-tools'
+import { sanitizeArticleHtml } from './scripts/sanitize-html'
 
 //#region -- mounted
 
@@ -470,6 +499,7 @@ let editorSaveLoadingTimeout: NodeJS.Timeout // 文章保存时的遮罩, 避免
  * @var boolean 如果为 true, 则文章允许保存, 为 false 时跳过保存
  */
 let articleChanged = false
+let contentSaveInProgress = false
 
 provide(provideKeyDocInfo, curDoc)
 provide(provideKeyCurArticleInfo, curArticle)
@@ -484,14 +514,25 @@ provide(provideKeyCurArticleInfo, curArticle)
  */
 const clickCurDoc = async (tree: DocTree) => {
   let doc: DocInfo = treeToInfo(tree)
-  curDoc.value = doc
   // 如果点击的是文章, 则查询文章详情, 用于在编辑器中显示以及注入
-  if (doc.type != 3) return
+  if (doc.type != 3) {
+    curDoc.value = doc
+    return
+  }
   // 如果点击的文章是当前正在展示的文章, 则不会再次查询
-  if (isArticle(curArticle.value) && curArticle.value!.id == doc.id) return
+  if (isArticle(curArticle.value) && curArticle.value!.id == doc.id) {
+    curDoc.value = doc
+    return
+  }
 
   editorGetLoadingTimeout = setTimeout(() => (editorGetLoading.value = true), 100)
-  await saveCurArticleContent(true)
+  const saved = await saveCurArticleContent(true)
+  if (!saved) {
+    if (editorGetLoadingTimeout) clearTimeout(editorGetLoadingTimeout)
+    editorGetLoading.value = false
+    return
+  }
+  curDoc.value = doc
   clearTocAndImg()
   await articleInfoApi({ id: doc.id, showToc: false, showMarkdown: true, showHtml: false })
     .then((resp) => {
@@ -514,65 +555,151 @@ const clickCurDoc = async (tree: DocTree) => {
     })
 }
 
+const revisionConflict = ref({
+  show: false,
+  showDiff: false,
+  loading: false,
+  articleId: '',
+  localMarkdown: '',
+  latestMarkdown: '',
+  latestArticle: undefined as DocInfo | undefined
+})
+
+const isRevisionConflict = (error: any): boolean => {
+  const code = error?.data?.code ?? error?.response?.data?.code
+  return code === 'ARTICLE-CONFLICT' || error?.status === 409 || error?.response?.status === 409
+}
+
+const openRevisionConflict = async (articleId: string, localMarkdown: string) => {
+  revisionConflict.value = {
+    show: true,
+    showDiff: revisionConflict.value.showDiff,
+    loading: true,
+    articleId,
+    localMarkdown,
+    latestMarkdown: '',
+    latestArticle: undefined
+  }
+  try {
+    const resp = await articleInfoApi({ id: articleId, showToc: false, showMarkdown: true, showHtml: false })
+    revisionConflict.value.latestArticle = resp.data
+    revisionConflict.value.latestMarkdown = resp.data?.markdown || ''
+  } catch (error: any) {
+    ElMessage.error(error?.message || '读取服务器最新版失败，请稍后重试')
+  } finally {
+    revisionConflict.value.loading = false
+  }
+}
+
+const copyConflictLocal = () => {
+  writeText(revisionConflict.value.localMarkdown)
+  ElMessage.success('本地 Markdown 已复制')
+}
+
+const loadConflictLatest = async () => {
+  if (!revisionConflict.value.latestArticle) {
+    await openRevisionConflict(revisionConflict.value.articleId, revisionConflict.value.localMarkdown)
+    if (!revisionConflict.value.latestArticle) return
+  }
+  try {
+    await ElMessageBox.confirm('加载后，编辑器中的本地未保存内容将被服务器最新版替换。建议先复制本地 Markdown。', '确认加载最新版？', {
+      confirmButtonText: '加载最新版',
+      cancelButtonText: '继续保留本地',
+      type: 'warning',
+      draggable: true
+    })
+    const latestArticle = revisionConflict.value.latestArticle!
+    if (!curArticle.value || String(curArticle.value.id) !== revisionConflict.value.articleId) return
+    curArticle.value = { ...latestArticle, markdown: '' }
+    setNewState(revisionConflict.value.latestMarkdown)
+    articleChanged = false
+    revisionConflict.value.show = false
+    ElMessage.success('已加载服务器最新版')
+  } catch (error) {
+    // 用户取消时继续保留本地内容。
+  }
+}
+
 /**
  * 保存文章的正文, 并更新编辑器状态栏中的版本, 字数, 修改时间等信息.
  *
  * @param auto 是否为自动保存, 如果是自动保存, 则不弹出保存成功的提示框, 避免在非用户主动操作下弹框
  */
-const saveCurArticleContent = async (auto: boolean = false) => {
-  if (!isArticle(curArticle.value)) return
+const saveCurArticleContent = async (auto: boolean = false): Promise<boolean> => {
+  let targetArticle = curArticle.value
+  if (!targetArticle || targetArticle.type !== 3) return true
+  while (contentSaveInProgress) {
+    await sleep(50)
+  }
+  targetArticle = curArticle.value
+  if (!targetArticle || targetArticle.type !== 3) return true
+  if (revisionConflict.value.show && revisionConflict.value.articleId === String(targetArticle.id)) {
+    return false
+  }
 
   // 文档发生变动才保存
   if (!articleChanged) {
     console.info('%c文档内容无变化, 无需保存', 'background:#AD8CF2;color:#fff;')
     saveCallback(auto)
-    return
+    return true
   }
   console.log('1. 开始保存 saveCurArticleContent')
-  ArticleTreeDocsContainerRef.value.style.pointerEvents = 'none'
+  if (ArticleTreeDocsContainerRef.value) ArticleTreeDocsContainerRef.value.style.pointerEvents = 'none'
   editorSaveLoadingTimeout = setTimeout(() => (editorSaveLoading.value = true), 500)
-  if (editorOperator.value.syncParse) {
-    parseCallback()
-  } else {
-    parse(parseCallback)
+  contentSaveInProgress = true
+  try {
+    if (!editorOperator.value.syncParse) {
+      await new Promise<void>((resolve) => parse(async () => resolve()))
+    }
+    return await parseCallback(auto)
+  } finally {
+    contentSaveInProgress = false
   }
 }
 
-const parseCallback = async (auto: boolean = false) => {
+const parseCallback = async (auto: boolean = false): Promise<boolean> => {
   while (renderAsync.value.done != renderAsync.value.need) {
     console.log('   检测到正在解析, 等待解析完成')
     await sleep(50)
   }
   console.log('6. 开始调用保存接口 parseCallback')
+  const savingArticle = curArticle.value!
+  const localMarkdown = cmw.getDocString()
+  const expectedRevision = savingArticle.revision ?? savingArticle.version ?? 0
+  await parseToc()
   articleChanged = false
-  let data = {
-    id: curArticle.value!.id,
-    name: curArticle.value!.name,
-    markdown: cmw.getDocString(),
-    html: PreviewRef.value.innerHTML, // 存在异步渲染的 html 元素, 不能直接使用 articleHtml.value
+  const data = {
+    id: savingArticle.id,
+    name: savingArticle.name,
+    markdown: localMarkdown,
+    expectedRevision,
+    html: sanitizeArticleHtml(PreviewRef.value?.innerHTML || articleHtml.value),
+    toc: JSON.stringify(articleToc.value),
     references: articleImg.value.concat(articleLink.value)
   }
-  await articleUpdContentApi(data)
-    .then((resp) => {
+  try {
+    const resp = await articleUpdContentApi(data)
+    if (curArticle.value && curArticle.value.id === savingArticle.id) {
       lastSaveTime = new Date().getTime()
-      curArticle.value!.words = resp.data.words as number
-      curArticle.value!.updTime = resp.data.updTime as string
-      if (curArticle.value!.version != undefined) {
-        curArticle.value!.version = curArticle.value!.version + 1
-      } else {
-        curArticle.value!.version = 1
-      }
-      if (editorSaveLoadingTimeout) clearTimeout(editorSaveLoadingTimeout)
-      saveCallback(auto)
-    })
-    .catch(() => {
-      articleChanged = true
-    })
-    .finally(() => {
-      console.log('7. 保存接口调用完成 parseCallback finally')
-      ArticleTreeDocsContainerRef.value.style.pointerEvents = 'auto'
-      editorSaveLoading.value = false
-    })
+      if (resp.data?.words !== undefined) curArticle.value.words = resp.data.words
+      if (resp.data?.updTime !== undefined) curArticle.value.updTime = resp.data.updTime
+      curArticle.value.revision = resp.data?.revision ?? getKnownArticleRevision(savingArticle.id) ?? expectedRevision + 1
+      curArticle.value.version = resp.data?.version ?? (curArticle.value.version ?? 0) + 1
+    }
+    saveCallback(auto)
+    return true
+  } catch (error: any) {
+    articleChanged = true
+    if (isRevisionConflict(error)) {
+      await openRevisionConflict(String(savingArticle.id), localMarkdown)
+    }
+    return false
+  } finally {
+    if (editorSaveLoadingTimeout) clearTimeout(editorSaveLoadingTimeout)
+    console.log('7. 保存接口调用完成 parseCallback finally')
+    if (ArticleTreeDocsContainerRef.value) ArticleTreeDocsContainerRef.value.style.pointerEvents = 'auto'
+    editorSaveLoading.value = false
+  }
 }
 
 const saveCallback = (auto: boolean = false) => {
@@ -755,7 +882,7 @@ const parse = (callback?: () => Promise<void>) => {
   clearTocAndImg()
   if (editorOperator.value.syncParse) {
     marked.parse(cmw.getDocString(), { async: true }).then((content: string) => {
-      articleHtml.value = content
+      articleHtml.value = sanitizeArticleHtml(content)
       renderInterval.value = Date.now() - begin
       nextTick(() => {
         parseToc()
@@ -768,8 +895,8 @@ const parse = (callback?: () => Promise<void>) => {
     })
   } else {
     let html = marked.parse(cmw.getDocString())
-    console.log(html);
-    articleHtml.value = html
+    console.log(html)
+    articleHtml.value = sanitizeArticleHtml(html as string)
     renderInterval.value = Date.now() - begin
     nextTick(() => {
       parseToc()
@@ -896,7 +1023,7 @@ const clearTocAndImg = () => {
 }
 
 const parseToc = async () => {
-  parseTocAsync(PreviewRef.value).then((tocs) => (articleToc.value = tocs))
+  articleToc.value = await parseTocAsync(PreviewRef.value)
 }
 
 useDraggable(TocRef, TocTitleRef)
@@ -1055,4 +1182,27 @@ const unbindKeys = () => {
 @import './styles/bl-preview-toc.scss';
 @import './styles/article-backtop.scss';
 @import '@renderer/assets/styles/bl-loading-spinner.scss';
+
+.conflict-actions {
+  display: flex;
+  gap: 10px;
+  margin: 18px 0 12px;
+}
+
+.conflict-diff {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.conflict-diff-title {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+@media (max-width: 760px) {
+  .conflict-diff {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

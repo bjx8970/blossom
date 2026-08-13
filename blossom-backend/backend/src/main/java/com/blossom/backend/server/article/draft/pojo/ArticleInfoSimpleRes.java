@@ -75,6 +75,10 @@ public class ArticleInfoSimpleRes extends AbstractPOJO implements Serializable {
      */
     private Integer version;
     /**
+     * 并发修订号
+     */
+    private Long revision;
+    /**
      * 颜色
      */
     private String color;

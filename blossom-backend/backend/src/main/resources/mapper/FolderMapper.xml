@@ -39,10 +39,12 @@
                 select f1.id,f1.pid,f1.`name`,f1.icon,f1.tags,f1.open_status,f1.sort,f1.store_path,f1.type
                   from blossom_folder f1
                  where f1.id in <foreach collection="ids" item="item" open="(" close=")" separator=",">#{item}</foreach>
+                   and f1.user_id = #{userId}
              union all
                 select f2.id,f2.pid,f2.`name`,f2.icon,f2.tags,f2.open_status,f2.sort,f2.store_path,f2.type
                   from blossom_folder f2
             inner join to_top on to_top.pid = f2.id
+                 where f2.user_id = #{userId}
         )
         select distinct * from to_top order by id
     </select>
@@ -52,10 +54,12 @@
                 select f1.id,f1.pid,f1.`name`,f1.icon,f1.tags,f1.open_status,f1.sort,f1.store_path,f1.type
                   from blossom_folder f1
                  where f1.id in <foreach collection="ids" item="item" open="(" close=")" separator=",">#{item}</foreach>
+                   and f1.user_id = #{userId}
              union all
                 select f2.id,f2.pid,f2.`name`,f2.icon,f2.tags,f2.open_status,f2.sort,f2.store_path,f2.type
                   from blossom_folder f2
             inner join to_bottom on to_bottom.id = f2.pid
+                 where f2.user_id = #{userId}
         )
         select distinct * from to_bottom order by id
     </select>
@@ -79,7 +83,7 @@
             <if test="describes != null">describes = #{describes},</if>
             upd_time = now()
         </set>
-        where id = #{id}
+        where id = #{id} and user_id = #{userId}
     </update>
 
     <update id="updByIds">
@@ -88,7 +92,8 @@
             <if test="storePath != null">store_path = #{storePath},</if>
             upd_time = now()
         </set>
-        where id in <foreach collection="ids" item="item" open="(" close=")" separator=",">#{item}</foreach>
+        where user_id = #{userId}
+          and id in <foreach collection="ids" item="item" open="(" close=")" separator=",">#{item}</foreach>
     </update>
 
     <delete id="delByUserId">

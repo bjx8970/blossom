@@ -166,7 +166,7 @@ public class PictureService extends ServiceImpl<PictureMapper, PictureEntity> {
             pic.setPid(userId * -1);
             pic.setPathName(rootPath + uid + pname);
         } else {
-            FolderEntity folder = folderService.selectById(pid);
+            FolderEntity folder = folderService.selectById(pid, userId);
             XzException400HTTP.throwBy(ObjUtil.isNull(folder), "上传文件夹[" + pid + "]不存在, 请核对后再上传");
             final String storePath = StrUtil.isBlank(folder.getStorePath()) ? "/" : folder.getStorePath();
             pic.setPid(pid);

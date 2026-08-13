@@ -226,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onBeforeUnmount, nextTick, computed, watch } from 'vue'
+import { ref, provide, inject, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useServerStore } from '@renderer/stores/server'
 import { useUserStore } from '@renderer/stores/user'
@@ -262,7 +262,7 @@ import {
   docUpdSortApi
 } from '@renderer/api/blossom'
 import { grammar } from './scripts/markedjs'
-import { provideKeyDocTree } from '@renderer/views/doc/doc'
+import { getDocById, provideKeyCurArticleInfo, provideKeyDocTree } from '@renderer/views/doc/doc'
 import { getColor, handleTreeDrop } from '@renderer/views/doc/doc-tree'
 import { tags, tagLins, isShowImg, isShowSvg } from '@renderer/views/doc/doc-tree-detail'
 import { useLifecycle } from '@renderer/scripts/lifecycle'
@@ -306,6 +306,29 @@ const docTreeLoading = ref(true) // 文档菜单的加载动画
 const isShowSort = ref(false) // 是否显示文档排序
 const docTreeData = ref<DocTree[]>([]) // 文档菜单
 provide(provideKeyDocTree, docTreeData) // 提供菜单列表依赖注入, 主要用于在详情中选择上级文件夹, 避免二次查询
+const currentArticle = inject(provideKeyCurArticleInfo, ref<DocInfo>())
+
+const syncCurrentArticleRevision = (id: string, revision: number, patch?: Partial<DocInfo>) => {
+  const treeNode = DocTreeRef.value?.getNode(String(id))
+  if (treeNode?.data?.ty === 3) treeNode.data.r = revision
+  if (currentArticle.value && String(currentArticle.value.id) === String(id)) {
+    currentArticle.value.revision = revision
+    if (patch) Object.assign(currentArticle.value, patch)
+  }
+}
+
+// 正文保存发生在编辑器组件中；把它返回的新 revision 同步回树节点，避免紧接着
+// 重命名、打标签或拖拽时仍携带旧 revision 而与自己产生冲突。
+watch(
+  () => currentArticle.value?.revision,
+  (revision) => {
+    const id = currentArticle.value?.id
+    if (id !== undefined && revision !== undefined) {
+      const treeNode = DocTreeRef.value?.getNode(String(id))
+      if (treeNode?.data?.ty === 3) treeNode.data.r = revision
+    }
+  }
+)
 
 /** 获取路由参数 */
 const getRouteQueryParams = () => {
@@ -587,6 +610,15 @@ const handleDrop = (drag: Node, enter: Node, dropType: NodeDropType, _event: Dra
     docUpdSortApi({ docs: needUpd, folderType: 1 })
       .then((resp) => {
         docTreeData.value = resp.data
+        if (currentArticle.value) {
+          const latestTreeArticle = getDocById(String(currentArticle.value.id), docTreeData.value)
+          if (latestTreeArticle?.r !== undefined) {
+            syncCurrentArticleRevision(latestTreeArticle.i, latestTreeArticle.r, {
+              pid: latestTreeArticle.p,
+              sort: latestTreeArticle.s
+            })
+          }
+        }
         collapseNoChild()
       })
       .catch(() => getDocTree())
@@ -684,10 +716,16 @@ const rename = () => {
  */
 const blurArticleNameInput = (doc: DocTree) => {
   if (doc.ty === 3) {
-    articleUpdNameApi({ id: doc.i, name: doc.n }).then((_resp) => {
-      doc.updn = false
-      notAllowDragKey = ''
-    })
+    if (!doc.updn) return
+    doc.updn = false
+    notAllowDragKey = ''
+    const expectedRevision = doc.r ?? 0
+    articleUpdNameApi({ id: doc.i, name: doc.n, expectedRevision })
+      .then(() => {
+        doc.r = expectedRevision + 1
+        syncCurrentArticleRevision(doc.i, doc.r, { name: doc.n })
+      })
+      .catch(() => getDocTree())
   } else {
     folderUpdNameApi({ id: doc.i, name: doc.n }).then((_resp) => {
       doc.updn = false
@@ -878,7 +916,8 @@ const addArticle = (pid: string) => {
       s: resp.data.sort,
       icon: '',
       ty: 3,
-      star: 0
+      star: 0,
+      r: resp.data.revision ?? 0
     }
     addDocToTail(newArticle)
   })
@@ -969,8 +1008,11 @@ const star = (starStatus: 0 | 1) => {
  * 设为专题目录
  */
 const addArticleTag = (tag: string) => {
-  articleUpdTagApi({ id: curDoc.value.i, tag: tag }).then((resp) => {
+  const expectedRevision = curDoc.value.r ?? 0
+  articleUpdTagApi({ id: curDoc.value.i, tag: tag, expectedRevision }).then((resp) => {
     curDoc.value.t = resp.data
+    curDoc.value.r = expectedRevision + 1
+    syncCurrentArticleRevision(curDoc.value.i, curDoc.value.r, { tags: curDoc.value.t })
   })
 }
 
@@ -1032,6 +1074,18 @@ const savedCallback = (_dialogType: DocDialogType, doc: DocInfo) => {
   oldDoc.icon = doc.icon!
   oldDoc.o = doc.openStatus
   oldDoc.star = doc.starStatus
+  oldDoc.r = doc.revision
+  if (doc.type === 3 && doc.revision !== undefined) {
+    syncCurrentArticleRevision(doc.id, doc.revision, {
+      pid: doc.pid,
+      name: doc.name,
+      tags: doc.tags,
+      icon: doc.icon,
+      sort: doc.sort,
+      cover: doc.cover,
+      describes: doc.describes
+    })
+  }
   if (oldDoc.s !== doc.sort || oldDoc.p !== doc.pid) {
     getDocTree(() => {
       collapseNoChild()

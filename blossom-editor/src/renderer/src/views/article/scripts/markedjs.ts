@@ -18,6 +18,7 @@ import { Markmap, deriveOptions } from 'markmap-view'
 import { ArticleReference } from './article'
 import { picCacheWrapper } from '@renderer/views/picture/scripts/picture'
 import { getDocById } from '@renderer/views/doc/doc'
+import { sanitizeArticleHtml, sanitizeMarkmapSvg } from './sanitize-html'
 // import 'highlight.js/styles/atom-one-light.css';
 // import 'highlight.js/styles/base16/darcula.css';
 
@@ -43,7 +44,7 @@ const markmapOptions = deriveOptions({
  */
 mermaid.initialize({
   startOnLoad: false,
-  securityLevel: 'loose'
+  securityLevel: 'strict'
 })
 mermaid.parseError = (_err, _hash) => {}
 
@@ -221,7 +222,7 @@ export const renderCode = (code: string, language: string | undefined, _isEscape
               retry++
             }
             if (element) {
-              element.innerHTML = svg
+              element.innerHTML = sanitizeArticleHtml(svg)
             }
             asyncStat.done++
           })
@@ -235,7 +236,7 @@ export const renderCode = (code: string, language: string | undefined, _isEscape
           你可以尝试前往 Mermaid 官网来校验你的内容, 或者查看相关文档: <a href='https://mermaid.live/edit' target='_blank'>https://mermaid.live/edit</a>
           </p>`
         let element = document.getElementById(eleid)
-        if (element) element!.innerHTML = html
+        if (element) element.innerHTML = sanitizeArticleHtml(html)
         asyncStat.done++
       })
     return `<p class="mermaid-container" style="height:${height}" id="${eleid}"></p>`
@@ -288,6 +289,7 @@ export const renderCode = (code: string, language: string | undefined, _isEscape
       }
       if (svg) {
         Markmap.create(svg, markmapOptions, root)
+        sanitizeMarkmapSvg(svg)
       }
       asyncStat.done++
     })
@@ -348,7 +350,7 @@ export const renderCode = (code: string, language: string | undefined, _isEscape
     }
   }
   let lineNumbers = result + '</ol>'
-  return `<pre><code id="${id}" class="hljs language-${language}">${code}</code>${lineNumbers}<div class="pre-copy" onclick="onHtmlEventDispatch(this,'click',event,'copyPreCode','${id}')">${language}</div></pre>`
+  return `<pre><code id="${id}" class="hljs language-${language}">${code}</code>${lineNumbers}<div class="pre-copy" data-bl-event="copyPreCode" data-bl-data="${id}">${language}</div></pre>`
 }
 
 /**
@@ -443,7 +445,7 @@ export const renderLink = (
       }
 
       link = `<a target="_blank" href=${href} class="inner-link"
-      onclick="onHtmlEventDispatch(this,'',event,'showArticleReferenceView','${ref.targetId}')">${text}</a>`
+      data-bl-event="showArticleReferenceView" data-bl-data="${ref.targetId}">${text}</a>`
     } else {
       link = `<a target="_blank" href=${href} title=${title} >${text}</a>`
     }

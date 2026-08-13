@@ -84,6 +84,7 @@ import { rgbaToHex, rgbToHex } from '@renderer/assets/utils/color'
 import { openNewArticleWindow } from '@renderer/assets/utils/electron'
 import { keymaps } from './scripts/editor-tools'
 import hotkeys from 'hotkeys-js'
+import { sanitizeArticleHtml } from './scripts/sanitize-html'
 
 onMounted(() => {
   document.addEventListener('keydown', handleKeyDown)
@@ -131,7 +132,12 @@ const handleOperator = () => {
  */
 const search = () => {
   articleSearchApi({ keyword: searchKeyword.value, hlColor: getColor(), debug: false, operator: isOperator.value }).then((resp) => {
-    result.value = resp.data.hits
+    result.value = (resp.data.hits || []).map((article: Article) => ({
+      ...article,
+      name: sanitizeArticleHtml(article.name),
+      markdown: sanitizeArticleHtml(article.markdown),
+      tags: (article.tags || []).map((tag) => sanitizeArticleHtml(tag))
+    }))
     totalHit.value = resp.data.totalHit
     if (isNull(resp.data.hits)) {
       noResult.value = true

@@ -152,7 +152,6 @@ FROM (select 900                                                                
 WHERE NOT EXISTS(SELECT 1
                  FROM base_sys_param
                  WHERE id = 900);
---
 INSERT INTO base_sys_param (id, param_name, param_value, param_desc, open_state, cre_time, upd_time)
 SELECT *
 FROM (select 901                     as id,
@@ -217,6 +216,19 @@ FROM (select 1001              as id,
 WHERE NOT EXISTS(SELECT 1
                  FROM base_sys_param
                  WHERE id = 1001);
+-- AI 设备令牌的服务端 pepper。放在固定 ID 参数之后，避免自增 ID 占用 901-1001。
+-- 可通过 project.ai.token-pepper 覆盖；不得返回给客户端。
+INSERT INTO base_sys_param (param_name, param_value, param_desc, open_state, cre_time, upd_time)
+SELECT *
+FROM (select 'AI_TOKEN_PEPPER'                                      as param_name,
+             sha2(concat(uuid(), rand(), current_timestamp(6)), 256) as param_value,
+             'AI设备令牌服务端Pepper'                                   as param_desc,
+             1                                                      as open_state,
+             CURRENT_TIMESTAMP                                      as cre_time,
+             CURRENT_TIMESTAMP                                      as upd_time) as temp
+WHERE NOT EXISTS(SELECT 1
+                 FROM base_sys_param
+                 WHERE param_name = 'AI_TOKEN_PEPPER');
 -- ----------------------------
 -- since: 1.12.0
 -- ----------------------------
@@ -308,8 +320,9 @@ CREATE TABLE IF NOT EXISTS `blossom_article`
     `likes`        int                                                    NOT NULL DEFAULT 0 COMMENT '点赞数',
     `words`        int                                                    NOT NULL DEFAULT 0 COMMENT '文章字数',
     `version`      int                                                    NOT NULL DEFAULT 0 COMMENT '版本',
+    `revision`     bigint                                                 NOT NULL DEFAULT 0 COMMENT '内容及元数据的并发修订号',
     `color`        varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '颜色',
-    `toc`          text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin         NULL COMMENT '目录解析',
+    `toc`          mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin   NULL COMMENT '目录解析',
     `markdown`     mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin   NULL COMMENT 'Markdown 内容',
     `html`         mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin   NULL COMMENT 'Html内容',
     `cre_time`     datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -321,6 +334,95 @@ CREATE TABLE IF NOT EXISTS `blossom_article`
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_bin COMMENT = '文章，Article'
   ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- since: 1.18.0
+-- AI 工具使用 revision 进行乐观锁校验。老数据以已有正文 version 作为初始值。
+-- 脚本配置了 continue-on-error，重复启动时 ADD COLUMN 错误会被忽略。
+-- ----------------------------
+alter table blossom_article
+    add column revision bigint NOT NULL DEFAULT 0 COMMENT '内容及元数据的并发修订号' after version;
+
+update blossom_article
+   set revision = version
+ where revision = 0
+   and version <> 0;
+
+-- 2 MiB Markdown 可能派生出超过 64 KiB 的目录 JSON，TOC 与正文使用相同容量级别。
+alter table blossom_article
+    modify column toc mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '目录解析';
+
+-- ----------------------------
+-- AI device tokens
+-- 原始 token 只在签发/轮换时返回一次，数据库仅保存带服务端 pepper 的 HMAC-SHA-256 和可展示前缀。
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `blossom_ai_device_token`
+(
+    `id`             bigint                                                 NOT NULL AUTO_INCREMENT COMMENT 'ID',
+    `user_id`        bigint                                                 NOT NULL COMMENT '所属用户',
+    `device_id`      varchar(64) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL COMMENT '客户端稳定设备标识',
+    `name`           varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '设备名称',
+    `token_prefix`   varchar(24) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL COMMENT '可展示的 token 前缀',
+    `token_hash`     char(64) CHARACTER SET ascii COLLATE ascii_bin          NOT NULL COMMENT 'HMAC-SHA-256',
+    `scopes`         varchar(32) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL COMMENT 'read,write',
+    `expire_time`    datetime                                               NOT NULL COMMENT '过期时间',
+    `revoked_time`   datetime                                               NULL COMMENT '撤销时间',
+    `last_used_time` datetime                                               NULL COMMENT '最近使用时间',
+    `cre_time`       datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `upd_time`       datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `unq_ai_device_token_device` (`user_id`, `device_id`) USING BTREE,
+    UNIQUE KEY `unq_ai_device_token_hash` (`token_hash`) USING BTREE,
+    KEY `idx_ai_device_token_user` (`user_id`) USING BTREE
+) ENGINE = InnoDB
+  CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_bin COMMENT = 'AI 设备令牌';
+
+-- ----------------------------
+-- AI operation audit (never stores token secrets or article bodies)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `blossom_ai_audit`
+(
+    `id`              bigint                                                 NOT NULL AUTO_INCREMENT COMMENT 'ID',
+    `user_id`         bigint                                                 NOT NULL COMMENT '用户 ID',
+    `token_id`        bigint                                                 NULL COMMENT '设备令牌 ID',
+    `action`          varchar(40) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL COMMENT '操作',
+    `resource_type`   varchar(30) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL DEFAULT '' COMMENT '资源类型',
+    `resource_id`     bigint                                                 NULL COMMENT '资源 ID',
+    `request_id`      varchar(80) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL DEFAULT '' COMMENT '请求 ID',
+    `before_revision` bigint                                                 NULL COMMENT '操作前修订号',
+    `after_revision`  bigint                                                 NULL COMMENT '操作后修订号',
+    `result`          varchar(16) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL COMMENT 'SUCCESS/FAILED',
+    `error_code`      varchar(40) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL DEFAULT '' COMMENT '错误类型',
+    `ip`              varchar(51) CHARACTER SET ascii COLLATE ascii_bin       NOT NULL DEFAULT '' COMMENT '请求 IP',
+    `cre_time`        datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    KEY `idx_ai_audit_user_time` (`user_id`, `cre_time`) USING BTREE,
+    KEY `idx_ai_audit_token` (`token_id`) USING BTREE
+) ENGINE = InnoDB
+  CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_bin COMMENT = 'AI 操作审计';
+
+-- ----------------------------
+-- AI idempotency records
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `blossom_ai_idempotency`
+(
+    `id`              bigint                                           NOT NULL AUTO_INCREMENT COMMENT 'ID',
+    `user_id`         bigint                                           NOT NULL COMMENT '用户 ID',
+    `token_id`        bigint                                           NOT NULL COMMENT '设备令牌 ID',
+    `operation`       varchar(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '操作',
+    `idempotency_key` varchar(80) CHARACTER SET ascii COLLATE ascii_bin NOT NULL COMMENT '幂等键',
+    `request_hash`    char(64) CHARACTER SET ascii COLLATE ascii_bin    NOT NULL COMMENT '请求载荷 SHA-256',
+    `resource_id`     bigint                                           NULL COMMENT '创建的资源 ID',
+    `cre_time`        datetime                                         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`) USING BTREE,
+    UNIQUE KEY `unq_ai_idempotency` (`token_id`, `operation`, `idempotency_key`) USING BTREE,
+    KEY `idx_ai_idempotency_user` (`user_id`) USING BTREE,
+    KEY `idx_ai_idempotency_expire` (`cre_time`) USING BTREE
+) ENGINE = InnoDB
+  CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_bin COMMENT = 'AI 幂等请求';
 
 
 -- ----------------------------
@@ -367,8 +469,11 @@ CREATE TABLE IF NOT EXISTS `blossom_article_recycle`
     `likes`     int                                                    NOT NULL DEFAULT '0' COMMENT '点赞数',
     `words`     int                                                    NOT NULL DEFAULT '0' COMMENT '文章字数',
     `version`   int                                                    NOT NULL DEFAULT '0' COMMENT '版本',
+    `revision`  bigint                                                 NOT NULL DEFAULT 0 COMMENT '删除时的聚合修订号',
     `color`     varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin  NOT NULL DEFAULT '' COMMENT '颜色',
     `markdown`  mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT 'Markdown 内容',
+    `html`      mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT '删除时保存的 Blossom 扩展 Html',
+    `toc`       mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT '删除时保存的目录 JSON',
     `cre_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `upd_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     `del_time`  datetime                                               NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '删除时间',
@@ -378,6 +483,22 @@ CREATE TABLE IF NOT EXISTS `blossom_article_recycle`
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_bin
   ROW_FORMAT = DYNAMIC COMMENT ='文章回收站';
+
+-- since 1.18.0: 回收/恢复不能让 revision 回退到仅正文 version。
+alter table blossom_article_recycle
+    add column revision bigint NOT NULL DEFAULT 0 COMMENT '删除时的聚合修订号' after version;
+
+update blossom_article_recycle
+   set revision = version
+ where revision = 0
+   and version <> 0;
+
+-- since 1.18.0: 恢复文章时保留桌面渲染器生成的扩展 HTML/TOC，禁止 CommonMark 降级覆盖。
+alter table blossom_article_recycle
+    add column html mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '删除时保存的 Blossom 扩展 Html' after markdown;
+
+alter table blossom_article_recycle
+    add column toc mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '删除时保存的目录 JSON' after html;
 
 -- ----------------------------
 -- Table structure for blossom_article_open
@@ -390,7 +511,7 @@ CREATE TABLE IF NOT EXISTS `blossom_article_open`
     `open_version` int                                                  NOT NULL DEFAULT 1 COMMENT '版本',
     `open_time`    datetime                                             NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '公开时间',
     `sync_time`    datetime                                             NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '同步时间',
-    `toc`          text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin       NULL COMMENT '目录',
+    `toc`          mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '目录',
     `markdown`     mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT 'Markdown 内容',
     `html`         mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT 'Html内容',
     `user_id`      bigint                                               NOT NULL DEFAULT 1 COMMENT '用户ID',
@@ -399,6 +520,9 @@ CREATE TABLE IF NOT EXISTS `blossom_article_open`
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_bin COMMENT = '公开文章，ArticleOpen'
   ROW_FORMAT = DYNAMIC;
+
+alter table blossom_article_open
+    modify column toc mediumtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT '目录';
 
 -- ----------------------------
 -- Records of blossom_article_open
@@ -411,10 +535,10 @@ CREATE TABLE IF NOT EXISTS `blossom_article_reference`
 (
     `id`          bigint                                                 NOT NULL AUTO_INCREMENT COMMENT 'ID',
     `source_id`   bigint                                                 NOT NULL COMMENT '文章ID',
-    `source_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '文章名称',
+    `source_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '文章名称',
     `target_Id`   bigint                                                 NOT NULL COMMENT '引用文章ID',
     `target_name` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '引用名称',
-    `target_url`  varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '图片链接',
+    `target_url`  varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT '图片链接',
     `type`        tinyint                                                NOT NULL COMMENT '引用类型: 10:图片; 11:文章; 21:外部文章',
     `user_id`     bigint                                                 NOT NULL DEFAULT '1' COMMENT '用户ID',
     PRIMARY KEY (`id`) USING BTREE,
@@ -431,6 +555,10 @@ CREATE TABLE IF NOT EXISTS `blossom_article_reference`
 -- ----------------------------
 alter table blossom_article_reference
     modify target_url varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL comment '链接地址';
+
+-- since 1.18.0: 与文章标题的 255 字符契约保持一致。
+alter table blossom_article_reference
+    modify source_name varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' COMMENT '文章名称';
 
 -- ----------------------------
 -- Table structure for blossom_article_view

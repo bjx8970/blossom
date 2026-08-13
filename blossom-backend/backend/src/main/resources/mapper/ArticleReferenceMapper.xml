@@ -32,7 +32,8 @@
                target_name,
                target_url
           from blossom_article_reference
-         where source_id = #{articleId}
+         where user_id = #{userId}
+           and source_id = #{articleId}
            and type = 10
     </select>
 

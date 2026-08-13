@@ -1,6 +1,7 @@
 package com.blossom.backend.base.auth.filters;
 
 import com.blossom.backend.base.auth.AuthContext;
+import com.blossom.backend.base.auth.AuthConstant;
 import com.blossom.backend.base.auth.AuthProperties;
 import com.blossom.backend.base.auth.exception.AuthException;
 import com.blossom.backend.base.auth.exception.AuthRCode;
@@ -45,6 +46,10 @@ public abstract class AuthFilterProxy extends GenericFilterBean {
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
+        if (Boolean.TRUE.equals(request.getAttribute(AuthConstant.AI_DEVICE_AUTH_ATTRIBUTE_KEY))) {
+            chain.doFilter(request, response);
+            return;
+        }
         if (!properties.getEnabled()) {
             chain.doFilter(request, response);
         } else {

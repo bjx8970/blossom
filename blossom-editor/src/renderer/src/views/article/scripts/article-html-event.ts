@@ -1,6 +1,7 @@
 import { writeText } from '@renderer/assets/utils/electron'
-import { Ref, nextTick, onMounted, ref } from 'vue'
+import { Ref, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { articleInfoApi } from '@renderer/api/blossom'
+import { sanitizeArticleHtml } from './sanitize-html'
 
 type ArticleHtmlEvent = 'copyPreCode' | 'showArticleReferenceView'
 
@@ -8,6 +9,7 @@ const articleViewWidth = 550
 const articleViewHeight = 370
 
 export function useArticleHtmlEvent(articleViewRef: Ref<HTMLElement>) {
+  let bindCloseTimer: NodeJS.Timeout | undefined
   const articleReferenceView = ref({
     show: false,
     html: '',
@@ -21,16 +23,19 @@ export function useArticleHtmlEvent(articleViewRef: Ref<HTMLElement>) {
     }
   })
 
-  function onHtmlEventDispatch(_t: any, _ty: any, event: any, type: ArticleHtmlEvent, data: any) {
-    // console.log(type)
-    // console.log(t)
-    // console.log(ty)
-    // console.log(e)
+  const closeView = () => {
+    if (articleViewRef.value) {
+      articleViewRef.value.removeEventListener('mouseleave', closeView)
+    }
+    articleReferenceView.value.show = false
+  }
+
+  function onHtmlEventDispatch(event: MouseEvent, type: ArticleHtmlEvent, data: string) {
     /*
      复制代码块内容
      */
     if (type === 'copyPreCode') {
-      let code = document.getElementById(data)
+      const code = document.getElementById(data)
       if (code) {
         writeText(code.innerText)
       }
@@ -42,7 +47,8 @@ export function useArticleHtmlEvent(articleViewRef: Ref<HTMLElement>) {
      */
     if (type === 'showArticleReferenceView') {
       event.preventDefault()
-      let rect = event.target.getBoundingClientRect()
+      const target = event.target as HTMLElement
+      const rect = target.getBoundingClientRect()
       let top = rect.top + rect.height + 10
       if (document.body.clientHeight - top < articleViewHeight) {
         top = rect.top - articleViewHeight - 10
@@ -58,33 +64,35 @@ export function useArticleHtmlEvent(articleViewRef: Ref<HTMLElement>) {
       articleReferenceView.value.articleId = data
       articleReferenceView.value.html = `<p style="color:var(--bl-text-color-light)">正在加载文章...</p>`
 
-      function closeView() {
-        if (articleViewRef.value) {
-          articleViewRef.value.removeEventListener('mouseleave', closeView)
-        }
-        articleReferenceView.value.show = false
-      }
-
       nextTick(() => {
-        setTimeout(() => articleViewRef.value.addEventListener('mouseleave', closeView), 100)
+        bindCloseTimer = setTimeout(() => articleViewRef.value?.addEventListener('mouseleave', closeView), 100)
         articleInfoApi({ id: data, showToc: false, showMarkdown: false, showHtml: true }).then((resp) => {
-          articleReferenceView.value.html = resp.data.html
+          articleReferenceView.value.html = sanitizeArticleHtml(resp.data.html)
           articleReferenceView.value.name = resp.data.name
         })
       })
     }
   }
 
+  const handlePreviewClick = (event: MouseEvent) => {
+    const target = event.target as HTMLElement | null
+    const eventElement = target?.closest<HTMLElement>('[data-bl-event]')
+    if (!eventElement || !eventElement.closest('.bl-preview')) return
+    const type = eventElement.dataset.blEvent as ArticleHtmlEvent | undefined
+    const data = eventElement.dataset.blData
+    if (!type || !data || (type !== 'copyPreCode' && type !== 'showArticleReferenceView')) return
+    onHtmlEventDispatch(event, type, data)
+  }
+
   onMounted(() => {
-    window.onHtmlEventDispatch = onHtmlEventDispatch
+    document.addEventListener('click', handlePreviewClick)
   })
 
-  // onBeforeUnmount(() => {
-  //   if (articleViewRef.value) {
-  //     articleViewRef.value.removeEventListener('mouseleave', closeView)
-  //   }
-  //   document.body.removeEventListener('click', closeView)
-  // })
+  onBeforeUnmount(() => {
+    document.removeEventListener('click', handlePreviewClick)
+    if (bindCloseTimer) clearTimeout(bindCloseTimer)
+    closeView()
+  })
 
   return { articleReferenceView }
 }

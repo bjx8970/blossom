@@ -16,9 +16,13 @@ import com.blossom.backend.server.article.recycle.ArticleRecycleMapper;
 import com.blossom.backend.server.article.reference.ArticleReferenceService;
 import com.blossom.backend.server.article.view.ArticleViewService;
 import com.blossom.backend.server.doc.pojo.DocTreeRes;
+import com.blossom.backend.server.folder.FolderService;
+import com.blossom.backend.server.folder.FolderTypeEnum;
+import com.blossom.backend.server.folder.pojo.FolderEntity;
 import com.blossom.backend.server.utils.ArticleUtil;
 import com.blossom.backend.server.utils.DocUtil;
 import com.blossom.common.base.exception.XzException404;
+import com.blossom.common.base.exception.XzException;
 import com.blossom.common.base.util.DateUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +46,7 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     private ArticleLogService logService;
     private ArticleOpenMapper openMapper;
     private ArticleRecycleMapper recycleMapper;
+    private FolderService folderService;
 
     @Autowired
     public void setReferenceService(ArticleReferenceService referenceService) {
@@ -66,6 +71,11 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Autowired
     public void setOpenMapper(ArticleOpenMapper openMapper) {
         this.openMapper = openMapper;
+    }
+
+    @Autowired
+    public void setFolderService(FolderService folderService) {
+        this.folderService = folderService;
     }
 
     /**
@@ -134,7 +144,7 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     public ArticleEntity selectById(Long id, boolean showToc, boolean showMarkdown, boolean showHtml, Long userId) {
         QueryWrapper<ArticleEntity> where = new QueryWrapper<>();
         List<String> column = CollUtil.newArrayList("id", "pid", "name", "icon", "tags", "sort", "cover", "describes", "star_status",
-                "open_status", "pv", "uv", "likes", "words", "version", "cre_time", "upd_time");
+                "open_status", "pv", "uv", "likes", "words", "version", "revision", "cre_time", "upd_time");
         if (showToc) {
             column.add(TagEnum.toc.name());
         }
@@ -155,8 +165,26 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @EnableIndex(type = IndexMsgTypeEnum.ADD, id = "#req.id")
     @Transactional(rollbackFor = Exception.class)
     public ArticleEntity insert(ArticleEntity req) {
-        baseMapper.insert(req);
+        validateArticleFolder(req.getPid(), req.getUserId());
+        int affected = baseMapper.insert(req);
+        if (affected != 1) {
+            throw new XzException("ARTICLE-INSERT-FAILED", "文章创建失败");
+        }
         return req;
+    }
+
+    /**
+     * AI/import 等受信任服务端命令可显式提交已经派生好的正文快照。
+     * 普通桌面创建仍只创建元数据，随后由桌面扩展渲染器调用正文保存接口。
+     */
+    @EnableIndex(type = IndexMsgTypeEnum.ADD, id = "#req.id")
+    @Transactional(rollbackFor = Exception.class)
+    public ArticleEntity insertWithDerivedContent(ArticleEntity req) {
+        ArticleEntity inserted = insert(req);
+        if (req.getMarkdown() != null) {
+            referenceService.bind(req.getUserId(), req.getId(), req.getName(), req.getReferences());
+        }
+        return inserted;
     }
 
     /**
@@ -167,11 +195,32 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Transactional(rollbackFor = Exception.class)
     public Long update(ArticleEntity req) {
         XzException404.throwBy(req.getId() == null, "ID不得为空");
-        baseMapper.updById(req);
+        if (req.getPid() != null) {
+            validateArticleFolder(req.getPid(), req.getUserId());
+        }
+        if (Boolean.TRUE.equals(req.getIncrementRevision()) && req.getExpectedRevision() == null) {
+            throw new XzException("CLIENT_UPGRADE_REQUIRED", "当前客户端未提供 expectedRevision，请升级后重试");
+        }
+        int affected = baseMapper.updById(req);
+        if (affected == 0 && req.getExpectedRevision() != null) {
+            throw new XzException("ARTICLE-CONFLICT", "文章已被其他客户端修改，请重新读取后再保存");
+        }
+        XzException404.throwBy(affected == 0, "文章不存在或无权修改");
         if(StrUtil.isNotBlank(req.getName())) {
             referenceService.updateInnerName(req.getUserId(), req.getId(), req.getName());
         }
         return req.getId();
+    }
+
+    private void validateArticleFolder(Long folderId, Long userId) {
+        XzException404.throwBy(folderId == null || folderId < 0 || userId == null,
+                "文章目录不存在或无权访问");
+        if (folderId == 0L) {
+            return;
+        }
+        FolderEntity folder = folderService.selectById(folderId, userId);
+        XzException404.throwBy(folder == null || !FolderTypeEnum.ARTICLE.getType().equals(folder.getType()),
+                "文章目录不存在或无权访问");
     }
 
     /**
@@ -183,16 +232,35 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Transactional(rollbackFor = Exception.class)
     public Integer updateContentById(ArticleEntity req) {
         XzException404.throwBy(req.getId() == null, "ID不得为空");
-        if (req.getMarkdown() != null) {
-            req.setWords(ArticleUtil.statWords(req.getMarkdown()));
+        if (req.getExpectedRevision() == null) {
+            throw new XzException("CLIENT_UPGRADE_REQUIRED", "当前客户端未提供 expectedRevision，请升级后重试");
         }
-        if (req.getHtml() != null) {
-            req.setHtml(req.getHtml().replaceAll("<p><br></p>", ""));
+        ArticleEntity before = selectById(req.getId(), false, true, false, req.getUserId());
+        XzException404.throwBy(before == null, "文章不存在或无权修改");
+        if (!req.getExpectedRevision().equals(before.getRevision())) {
+            throw new XzException("ARTICLE-CONFLICT", "文章已被其他客户端修改，请重新读取后再保存");
         }
+        if (req.getMarkdown() == null) {
+            throw new XzException("ARTICLE-MARKDOWN-REQUIRED", "markdown 正文不能为空");
+        }
+        // 普通桌面端使用 Blossom 自有 marked 扩展渲染 KaTeX、Mermaid、Markmap、
+        // Bilibili、双链和图片样式。这里保存客户端已经净化的派生结果，不能再用
+        // AI 的安全 CommonMark 基线覆盖，否则公开文章会丢失现有渲染能力。
+        if (req.getHtml() == null) {
+            throw new XzException("ARTICLE-HTML-REQUIRED", "桌面端保存必须提交已净化的 html");
+        }
+        if (req.getToc() == null) {
+            throw new XzException("ARTICLE-TOC-REQUIRED", "桌面端保存必须提交 toc");
+        }
+        req.setWords(ArticleUtil.statWords(req.getMarkdown()));
         req.setUpdMarkdownTime(DateUtils.date());
-        baseMapper.updContentById(req);
-        referenceService.bind(req.getUserId(), req.getId(), req.getName(), req.getReferences());
-        logService.insert(req.getId(), 0, req.getMarkdown());
+        int affected = baseMapper.updContentById(req);
+        if (affected == 0 && req.getExpectedRevision() != null) {
+            throw new XzException("ARTICLE-CONFLICT", "文章已被其他客户端修改，请重新读取后再保存");
+        }
+        XzException404.throwBy(affected == 0, "文章不存在或无权修改");
+        referenceService.bind(req.getUserId(), req.getId(), before.getName(), req.getReferences());
+        logService.insertSync(req.getId(), before.getVersion(), before.getMarkdown());
         return req.getWords();
     }
 
@@ -213,13 +281,18 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
         @since 1.10.0
         XzException400.throwBy(StrUtil.isNotBlank(article.getMarkdown()), "文章内容不为空, 请清空内容后再删除.");
          */
-        recycleMapper.save(article.getId());
+        if (recycleMapper.save(article.getId(), userId) != 1) {
+            throw new XzException("ARTICLE-RECYCLE-SAVE-FAILED", "文章无法写入回收站");
+        }
         // 删除文章
-        baseMapper.deleteById(id);
+        int affected = baseMapper.delete(new LambdaQueryWrapper<ArticleEntity>()
+                .eq(ArticleEntity::getId, id)
+                .eq(ArticleEntity::getUserId, userId));
+        XzException404.throwBy(affected != 1, "文章不存在或无权删除");
         // 删除公开文章
         openMapper.delById(id);
         // 删除主动引用
-        referenceService.delete(id);
+        referenceService.delete(id, userId);
         // 将被动引用中的名称修改为未知
         referenceService.updateToUnknown(userId, id);
         // 删除访问记录

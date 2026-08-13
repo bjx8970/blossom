@@ -79,7 +79,7 @@ public class FolderController {
      */
     @GetMapping("/info")
     public R<FolderRes> info(@RequestParam("id") Long id) {
-        FolderEntity entity = baseService.selectById(id);
+        FolderEntity entity = baseService.selectById(id, AuthContext.getUserId());
         XzException404.throwBy(ObjUtil.isNull(entity), "文件夹[" + id + "]信息不存在");
         FolderRes res = entity.to(FolderRes.class);
         res.setTags(DocUtil.toTagList(entity.getTags()));
@@ -117,6 +117,7 @@ public class FolderController {
     public R<Long> update(@Validated @RequestBody FolderUpdReq req) {
         FolderEntity folder = req.to(FolderEntity.class);
         folder.setTags(DocUtil.toTagStr(req.getTags()));
+        folder.setUserId(AuthContext.getUserId());
         // 检查排序是否重复
 //        if (folder.getSort() != null && folder.getPid() != null) {
 //            final long newPid = folder.getPid();
@@ -137,6 +138,7 @@ public class FolderController {
     @PostMapping("/upd/name")
     public R<?> updateName(@Validated @RequestBody FolderUpdNameReq req) {
         FolderEntity folder = req.to(FolderEntity.class);
+        folder.setUserId(AuthContext.getUserId());
         baseService.update(folder);
         return R.ok();
     }
@@ -148,7 +150,8 @@ public class FolderController {
      */
     @PostMapping("/upd/tag")
     public R<List<String>> updTag(@Validated @RequestBody ArticleUpdTagReq req) {
-        FolderEntity info = baseService.selectById(req.getId());
+        FolderEntity info = baseService.selectById(req.getId(), AuthContext.getUserId());
+        XzException404.throwBy(info == null, "文件夹不存在或无权修改");
         List<String> tags = DocUtil.toTagList(info.getTags());
         if (tags.contains(req.getTag().toLowerCase()) || tags.contains(req.getTag().toUpperCase())) {
             tags.remove(req.getTag().toLowerCase());
@@ -158,6 +161,7 @@ public class FolderController {
         }
         FolderEntity folder = req.to(FolderEntity.class);
         folder.setTags(DocUtil.toTagStr(tags));
+        folder.setUserId(AuthContext.getUserId());
         baseService.update(folder);
         return R.ok(tags);
     }
@@ -168,6 +172,7 @@ public class FolderController {
     @PostMapping("/open")
     public R<Long> open(@Validated @RequestBody FolderOpenCloseReq req) {
         FolderEntity folder = req.to(FolderEntity.class);
+        folder.setUserId(AuthContext.getUserId());
         return R.ok(baseService.update(folder));
     }
 
@@ -178,7 +183,7 @@ public class FolderController {
      */
     @PostMapping("/del")
     public R<?> del(@Validated @RequestBody DelReq req) {
-        baseService.delete(req.getId());
+        baseService.delete(req.getId(), AuthContext.getUserId());
         return R.ok();
     }
 }

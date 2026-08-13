@@ -91,6 +91,10 @@ public class ArticleEntity extends AbstractPOJO implements Serializable {
      */
     private Integer version;
     /**
+     * 文章修订号，正文或元数据变更时递增，用于多客户端乐观锁。
+     */
+    private Long revision;
+    /**
      * 颜色
      */
     private String color;
@@ -135,6 +139,18 @@ public class ArticleEntity extends AbstractPOJO implements Serializable {
      */
     @TableField(exist = false)
     private List<Long> pids;
+
+    /**
+     * 可选的期望修订号，仅用于条件更新。
+     */
+    @TableField(exist = false)
+    private Long expectedRevision;
+
+    /**
+     * 是否将本次元数据更新计入 revision。star/公开状态等非内容字段不计入。
+     */
+    @TableField(exist = false)
+    private Boolean incrementRevision;
 
     //endregion
 }

@@ -128,6 +128,7 @@ public class ArticleController {
         ArticleEntity article = req.to(ArticleEntity.class);
         article.setTags(DocUtil.toTagStr(req.getTags()));
         article.setUserId(AuthContext.getUserId());
+        article.setIncrementRevision(true);
         // 如果新增到顶部, 获取最小的排序
         if (BooleanUtil.isTrue(req.getAddToLast())) {
             article.setSort(docService.selectMaxSortByPid(req.getPid(), AuthContext.getUserId(), FolderTypeEnum.ARTICLE) + 1);
@@ -146,6 +147,7 @@ public class ArticleController {
         ArticleEntity article = req.to(ArticleEntity.class);
         article.setTags(DocUtil.toTagStr(req.getTags()));
         article.setUserId(AuthContext.getUserId());
+        article.setIncrementRevision(true);
         // 检查排序是否重复
 //        if (req.getSort() != null && req.getPid() != null) {
 //            final long newPid = req.getPid();
@@ -167,7 +169,13 @@ public class ArticleController {
         upd.setReferences(content.getReferences());
         upd.setUserId(AuthContext.getUserId());
         int words = baseService.updateContentById(upd);
+        ArticleEntity saved = baseService.selectById(content.getId(), false, false, false, AuthContext.getUserId());
         ArticleUpdContentRes res = new ArticleUpdContentRes();
+        res.setId(content.getId());
+        if (saved != null) {
+            res.setVersion(saved.getVersion());
+            res.setRevision(saved.getRevision());
+        }
         res.setWords(words);
         res.setUpdTime(DateUtils.date());
         return R.ok(res);
@@ -183,6 +191,7 @@ public class ArticleController {
     public R<?> updName(@Validated @RequestBody ArticleUpdNameReq name) {
         ArticleEntity article = name.to(ArticleEntity.class);
         article.setUserId(AuthContext.getUserId());
+        article.setIncrementRevision(true);
         baseService.update(article);
         return R.ok();
     }
@@ -195,6 +204,7 @@ public class ArticleController {
     @PostMapping("/upd/tag")
     public R<List<String>> updTag(@Validated @RequestBody ArticleUpdTagReq req) {
         ArticleEntity info = baseService.selectById(req.getId(), false, false, false, AuthContext.getUserId());
+        XzException404.throwBy(info == null, "文章不存在或无权修改");
         List<String> tags = DocUtil.toTagList(info.getTags());
         if (tags.contains(req.getTag().toLowerCase()) || tags.contains(req.getTag().toUpperCase())) {
             tags.remove(req.getTag().toLowerCase());
@@ -205,6 +215,7 @@ public class ArticleController {
         ArticleEntity article = req.to(ArticleEntity.class);
         article.setTags(DocUtil.toTagStr(tags));
         article.setUserId(AuthContext.getUserId());
+        article.setIncrementRevision(true);
         baseService.update(article);
         return R.ok(tags);
     }
@@ -292,12 +303,13 @@ public class ArticleController {
             if (!"txt".equals(suffix) && !"md".equals(suffix)) {
                 throw new XzException400("不支持的文件类型: [" + suffix + "]");
             }
-            FolderEntity folder = folderService.selectById(pid);
+            FolderEntity folder = folderService.selectById(pid, AuthContext.getUserId());
             XzException404.throwBy(ObjUtil.isNull(folder), "上级文件夹不存在");
             String content = new String(file.getBytes(), StandardCharsets.UTF_8);
             ArticleEntity article = new ArticleEntity();
             article.setMarkdown(content);
             article.setVersion(1);
+            article.setRevision(1L);
             article.setPid(pid);
             article.setUserId(AuthContext.getUserId());
             article.setName(FileUtil.getPrefix(file.getOriginalFilename()));
