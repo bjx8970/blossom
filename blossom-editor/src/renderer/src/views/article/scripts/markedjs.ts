@@ -18,7 +18,7 @@ import { Markmap, deriveOptions } from 'markmap-view'
 import { ArticleReference } from './article'
 import { picCacheWrapper } from '@renderer/views/picture/scripts/picture'
 import { getDocById } from '@renderer/views/doc/doc'
-import { sanitizeArticleElement, sanitizeArticleHtml } from './sanitize-html'
+import { sanitizeArticleHtml, sanitizeMarkmapSvg } from './sanitize-html'
 // import 'highlight.js/styles/atom-one-light.css';
 // import 'highlight.js/styles/base16/darcula.css';
 
@@ -289,7 +289,7 @@ export const renderCode = (code: string, language: string | undefined, _isEscape
       }
       if (svg) {
         Markmap.create(svg, markmapOptions, root)
-        sanitizeArticleElement(svg)
+        sanitizeMarkmapSvg(svg)
       }
       asyncStat.done++
     })

@@ -1,3 +1,5 @@
+import { globalCSS as markmapGlobalCss } from 'markmap-view'
+
 const blockedTags = new Set([
   'script',
   'style',
@@ -23,6 +25,30 @@ const blockedTags = new Set([
 
 const urlAttributes = new Set(['href', 'src', 'poster', 'background', 'action', 'formaction', 'xlink:href'])
 const allowedHtmlEvents = new Set(['copyPreCode', 'showArticleReferenceView'])
+const markmapSvgTags = new Set(['svg', 'style', 'g', 'path', 'line', 'circle', 'foreignobject'])
+const markmapHtmlTags = new Set([
+  'div',
+  'p',
+  'span',
+  'a',
+  'code',
+  'pre',
+  'del',
+  'em',
+  'strong',
+  'mark',
+  'table',
+  'thead',
+  'tbody',
+  'tr',
+  'th',
+  'td',
+  'img',
+  'br',
+  'ul',
+  'ol',
+  'li'
+])
 
 const isSafeUrl = (value: string, attribute: string, tagName: string): boolean => {
   const compact = value.replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase()
@@ -36,13 +62,8 @@ const isSafeUrl = (value: string, attribute: string, tagName: string): boolean =
   return false
 }
 
-const sanitizeElement = (element: Element) => {
+const sanitizeAttributes = (element: Element): void => {
   const tagName = element.tagName.toLowerCase()
-  if (blockedTags.has(tagName)) {
-    element.remove()
-    return
-  }
-
   if (tagName === 'iframe') {
     const src = element.getAttribute('src') || ''
     if (!/^https:\/\/player\.bilibili\.com\/player\.html(?:\?|$)/i.test(src)) {
@@ -97,6 +118,84 @@ const sanitizeElement = (element: Element) => {
   }
 }
 
+const sanitizeElement = (element: Element) => {
+  if (blockedTags.has(element.tagName.toLowerCase())) {
+    element.remove()
+    return
+  }
+  sanitizeAttributes(element)
+}
+
+const hasClass = (element: Element, className: string): boolean =>
+  (element.getAttribute('class') || '').split(/\s+/).filter(Boolean).includes(className)
+
+const closestByTagAndClass = (element: Element, tagName: string, className: string): Element | null => {
+  let current: Element | null = element
+  while (current) {
+    if (current.tagName.toLowerCase() === tagName && hasClass(current, className)) return current
+    current = current.parentElement
+  }
+  return null
+}
+
+const sanitizeMarkmapStyle = (style: Element, svg: SVGElement): void => {
+  // markmap-view creates exactly one direct <style> node. CSS here is generated
+  // by the library, never copied from Markdown. Reject anything that could load
+  // external content or escape into legacy executable CSS.
+  const directStyles = Array.from(svg.children).filter((element) => element.tagName.toLowerCase() === 'style')
+  if (style.parentNode !== svg || directStyles.length !== 1) {
+    style.remove()
+    return
+  }
+  for (const attribute of Array.from(style.attributes)) style.removeAttribute(attribute.name)
+  if ((style.textContent || '') !== markmapGlobalCss) {
+    style.remove()
+  }
+}
+
+const sanitizeMarkmapForeignObject = (foreignObject: Element): void => {
+  if (!hasClass(foreignObject, 'markmap-foreign') || !closestByTagAndClass(foreignObject.parentElement || foreignObject, 'g', 'markmap-node')) {
+    foreignObject.remove()
+    return
+  }
+  for (const descendant of Array.from(foreignObject.querySelectorAll('*'))) {
+    if (!markmapHtmlTags.has(descendant.tagName.toLowerCase())) {
+      descendant.remove()
+      continue
+    }
+    sanitizeElement(descendant)
+  }
+  sanitizeAttributes(foreignObject)
+}
+
+/**
+ * Clean the SVG produced by markmap-view without deleting its node labels.
+ * This is deliberately separate from the article sanitizer: foreignObject and
+ * SVG style remain forbidden everywhere except a real `.markmap` SVG tree.
+ */
+export const sanitizeMarkmapSvg = (svg: SVGElement): void => {
+  if (svg.tagName.toLowerCase() !== 'svg' || !hasClass(svg, 'markmap')) {
+    svg.remove()
+    return
+  }
+  for (const element of Array.from(svg.querySelectorAll('*'))) {
+    const tagName = element.tagName.toLowerCase()
+    const foreignObject = closestByTagAndClass(element, 'foreignobject', 'markmap-foreign')
+    if (!markmapSvgTags.has(tagName) && !foreignObject) {
+      element.remove()
+      continue
+    }
+    if (tagName === 'style') {
+      sanitizeMarkmapStyle(element, svg)
+    } else if (tagName === 'foreignobject') {
+      sanitizeMarkmapForeignObject(element)
+    } else if (!foreignObject) {
+      sanitizeElement(element)
+    }
+  }
+  sanitizeElement(svg)
+}
+
 /** 清理已经由图表库写入页面的节点，同时保留库通过 addEventListener 绑定的交互。 */
 export const sanitizeArticleElement = (root: Element) => {
   Array.from(root.querySelectorAll('*')).forEach(sanitizeElement)
@@ -111,6 +210,16 @@ export const sanitizeArticleHtml = (html: string | null | undefined): string => 
   if (!html) return ''
   const template = document.createElement('template')
   template.innerHTML = html
-  Array.from(template.content.querySelectorAll('*')).forEach(sanitizeElement)
+  const walk = (root: ParentNode): void => {
+    for (const element of Array.from(root.children)) {
+      if (element.tagName.toLowerCase() === 'svg' && hasClass(element, 'markmap')) {
+        sanitizeMarkmapSvg(element as SVGElement)
+        continue
+      }
+      sanitizeElement(element)
+      if (element.isConnected || element.parentNode) walk(element)
+    }
+  }
+  walk(template.content)
   return template.innerHTML
 }
