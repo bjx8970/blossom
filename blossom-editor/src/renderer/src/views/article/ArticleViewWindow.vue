@@ -36,6 +36,7 @@ import { articleInfoApi } from '@renderer/api/blossom'
 import { useConfigStore } from '@renderer/stores/config'
 import { parseTocAsync } from './scripts/article'
 import type { Toc } from './scripts/article'
+import { simpleMarked } from './scripts/markedjs'
 import AppHeader from '@renderer/components/AppHeader.vue'
 
 const configStore = useConfigStore()
@@ -57,8 +58,11 @@ const toScroll = (id: string) => {
 }
 
 const initPreview = (articleId: string) => {
-  articleInfoApi({ id: articleId, showToc: false, showMarkdown: false, showHtml: true }).then((resp) => {
+  articleInfoApi({ id: articleId, showToc: false, showMarkdown: true, showHtml: true }).then(async (resp) => {
     article.value = resp.data
+    if (!article.value.html && article.value.markdown) {
+      article.value.html = await simpleMarked.parse(article.value.markdown, { async: true })
+    }
     document.title = `《${resp.data.name}》`
     nextTick(() => initToc())
   })
