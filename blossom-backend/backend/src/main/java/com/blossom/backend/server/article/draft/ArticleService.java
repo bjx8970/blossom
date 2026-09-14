@@ -19,6 +19,7 @@ import com.blossom.backend.server.doc.pojo.DocTreeRes;
 import com.blossom.backend.server.utils.ArticleUtil;
 import com.blossom.backend.server.utils.DocUtil;
 import com.blossom.common.base.exception.XzException404;
+import com.blossom.common.base.exception.XzException500;
 import com.blossom.common.base.util.DateUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -156,6 +157,17 @@ public class ArticleService extends ServiceImpl<ArticleMapper, ArticleEntity> {
     @Transactional(rollbackFor = Exception.class)
     public ArticleEntity insert(ArticleEntity req) {
         baseMapper.insert(req);
+        return req;
+    }
+
+    @EnableIndex(type = IndexMsgTypeEnum.ADD, id = "#req.id")
+    @Transactional(rollbackFor = Exception.class)
+    public ArticleEntity importArticle(ArticleEntity req) {
+        baseMapper.insert(req);
+        ArticleEntity saved = selectById(req.getId(), false, true, false, req.getUserId());
+        if (saved == null || !req.getMarkdown().equals(saved.getMarkdown())) {
+            throw new XzException500("文章正文写入失败");
+        }
         return req;
     }
 

@@ -197,7 +197,7 @@
 
   <!-- 导入 -->
   <el-dialog v-model="isShowArticleImportDialog" width="335" top="80px" :append-to-body="true" :destroy-on-close="true" :close-on-click-modal="false">
-    <ArticleImport ref="ArticleImportRef" :doc="curDoc"></ArticleImport>
+    <ArticleImport ref="ArticleImportRef" :doc="curDoc" @imported="handleArticlesImported"></ArticleImport>
   </el-dialog>
 
   <!-- 自定义临时访问链接 -->
@@ -349,6 +349,24 @@ const refreshDocTree = () => {
       if (!isEmpty(docTreeData.value) && isNotBlank(docTreeCurrentId.value)) {
         DocTreeRef.value.setCurrentKey(docTreeCurrentId.value)
       }
+    })
+  })
+}
+
+const handleArticlesImported = (articles: DocInfo[]) => {
+  const imported = articles.length === 1 ? articles[0] : undefined
+  getDocTree(() => {
+    if (!imported) {
+      return
+    }
+    nextTick(() => {
+      const importedNode = DocTreeRef.value.getNode(imported.id)
+      if (!importedNode) {
+        return
+      }
+      docTreeCurrentId.value = imported.id
+      DocTreeRef.value.setCurrentKey(imported.id)
+      emits('clickDoc', importedNode.data)
     })
   })
 }

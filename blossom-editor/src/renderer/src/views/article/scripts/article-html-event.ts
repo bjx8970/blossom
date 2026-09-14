@@ -1,6 +1,7 @@
 import { writeText } from '@renderer/assets/utils/electron'
 import { Ref, nextTick, onMounted, ref } from 'vue'
 import { articleInfoApi } from '@renderer/api/blossom'
+import { simpleMarked } from './markedjs'
 
 type ArticleHtmlEvent = 'copyPreCode' | 'showArticleReferenceView'
 
@@ -67,8 +68,8 @@ export function useArticleHtmlEvent(articleViewRef: Ref<HTMLElement>) {
 
       nextTick(() => {
         setTimeout(() => articleViewRef.value.addEventListener('mouseleave', closeView), 100)
-        articleInfoApi({ id: data, showToc: false, showMarkdown: false, showHtml: true }).then((resp) => {
-          articleReferenceView.value.html = resp.data.html
+        articleInfoApi({ id: data, showToc: false, showMarkdown: true, showHtml: true }).then(async (resp) => {
+          articleReferenceView.value.html = resp.data.html || (resp.data.markdown ? await simpleMarked.parse(resp.data.markdown, { async: true }) : '')
           articleReferenceView.value.name = resp.data.name
         })
       })

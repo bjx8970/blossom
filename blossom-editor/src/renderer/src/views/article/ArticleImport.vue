@@ -9,6 +9,7 @@
     <div class="content">
       <el-upload
         ref="uploadRef"
+        v-model:file-list="uploadFiles"
         name="file"
         multiple
         :action="serverStore.serverUrl + articleImportApiUrl"
@@ -17,8 +18,8 @@
         :on-change="onChange"
         :show-file-list="true"
         :before-upload="beforeUpload"
-        :on-success="onUploadSeccess"
-        :on-error="onError"
+        :on-success="onUploadSuccess"
+        :on-error="onUploadError"
         :auto-upload="false">
         <template #trigger>
           <el-button size="default">选择文章</el-button>
@@ -34,12 +35,13 @@
 
 <script setup lang="ts">
 import { PropType, ref } from 'vue'
-import type { UploadInstance } from 'element-plus'
+import type { UploadFile, UploadFiles, UploadInstance, UploadProps, UploadUserFile } from 'element-plus'
 import { articleImportApiUrl } from '@renderer/api/blossom'
 import { useUserStore } from '@renderer/stores/user'
 import { useServerStore } from '@renderer/stores/server'
 import { uuid } from '@renderer/assets/utils/util'
-import { onChange, beforeUpload, onUploadSeccess, onError } from './scripts/article-import'
+import Notify from '@renderer/scripts/notify'
+import { onChange, beforeUpload, handleUploadSuccess, handleUploadError } from './scripts/article-import'
 
 const userStore = useUserStore()
 const serverStore = useServerStore()
@@ -51,11 +53,48 @@ const porps = defineProps({
   }
 })
 
-const importBatch = ref(uuid())
+const emits = defineEmits<{
+  imported: [articles: DocInfo[]]
+}>()
 
+const importBatch = ref(uuid())
 const uploadRef = ref<UploadInstance>()
+const uploadFiles = ref<UploadUserFile[]>([])
+const importedArticles = ref<DocInfo[]>([])
+let importedEmitted = false
+
+const emitImportedWhenComplete = (files: UploadFiles) => {
+  const completed = files.every((file) => file.status === 'success' || file.status === 'fail')
+  if (completed && importedArticles.value.length > 0 && !importedEmitted) {
+    importedEmitted = true
+    emits('imported', importedArticles.value)
+  }
+}
+
+const onUploadSuccess: UploadProps['onSuccess'] = (resp, file: UploadFile, files: UploadFiles) => {
+  if (handleUploadSuccess(resp)) {
+    file.status = 'success'
+    importedArticles.value.push({ ...resp.data, type: 3 })
+  } else {
+    file.status = 'fail'
+  }
+  emitImportedWhenComplete(files)
+}
+
+const onUploadError: UploadProps['onError'] = (error, file, files) => {
+  file.status = 'fail'
+  handleUploadError(error)
+  emitImportedWhenComplete(files)
+}
 
 const submitUpload = () => {
+  if (!uploadFiles.value.some((file) => file.status === 'ready')) {
+    Notify.error('请先选择文章', '上传失败')
+    return
+  }
+  importedArticles.value = []
+  importedEmitted = false
+  importBatch.value = uuid()
   uploadRef.value!.submit()
 }
 </script>

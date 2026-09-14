@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 
 
 /**
@@ -286,29 +287,32 @@ public class ArticleController {
      * @param pid  上级菜单
      */
     @PostMapping("import")
-    public R<?> upload(@RequestParam("file") MultipartFile file, @RequestParam(value = "pid") Long pid, @RequestParam(value = "batchId") String batchId) {
-        try {
-            String suffix = FileUtil.getSuffix(file.getOriginalFilename());
-            if (!"txt".equals(suffix) && !"md".equals(suffix)) {
-                throw new XzException400("不支持的文件类型: [" + suffix + "]");
-            }
-            FolderEntity folder = folderService.selectById(pid);
-            XzException404.throwBy(ObjUtil.isNull(folder), "上级文件夹不存在");
-            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
-            ArticleEntity article = new ArticleEntity();
-            article.setMarkdown(content);
-            article.setVersion(1);
-            article.setPid(pid);
-            article.setUserId(AuthContext.getUserId());
-            article.setName(FileUtil.getPrefix(file.getOriginalFilename()));
-//            article.setWords(ArticleUtil.statWords(content));
-            article.setSort(importManager.getSort(batchId, pid, AuthContext.getUserId()));
-            baseService.insert(article);
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new XzException400("上传失败");
+    public R<ArticleEntity> upload(@RequestParam("file") MultipartFile file, @RequestParam(value = "pid") Long pid, @RequestParam(value = "batchId") String batchId) throws IOException {
+        String filename = file.getOriginalFilename();
+        XzException400.throwBy(StrUtil.isBlank(filename), "文件名为空");
+        String suffix = FileUtil.getSuffix(filename).toLowerCase(Locale.ROOT);
+        XzException400.throwBy(!"txt".equals(suffix) && !"md".equals(suffix), "不支持的文件类型: [" + suffix + "]");
+        XzException400.throwBy(file.isEmpty(), "文件内容为空");
+
+        FolderEntity folder = folderService.selectById(pid);
+        XzException404.throwBy(ObjUtil.isNull(folder), "上级文件夹不存在");
+
+        String content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        if (content.startsWith("\uFEFF")) {
+            content = content.substring(1);
         }
-        return R.ok();
+        XzException400.throwBy(StrUtil.isBlank(content), "文件内容为空");
+
+        Long userId = AuthContext.getUserId();
+        ArticleEntity article = new ArticleEntity();
+        article.setMarkdown(content);
+        article.setWords(ArticleUtil.statWords(content));
+        article.setVersion(1);
+        article.setPid(pid);
+        article.setUserId(userId);
+        article.setName(FileUtil.getPrefix(filename));
+        article.setSort(importManager.getSort(batchId, pid, userId));
+        return R.ok(baseService.importArticle(article));
     }
 
     /**
