@@ -59,11 +59,12 @@ const toScroll = (id: string) => {
 
 const initPreview = (articleId: string) => {
   articleInfoApi({ id: articleId, showToc: false, showMarkdown: true, showHtml: true }).then(async (resp) => {
-    article.value = resp.data
-    if (!article.value.html && article.value.markdown) {
-      article.value.html = await simpleMarked.parse(article.value.markdown, { async: true })
+    const articleData = resp.data
+    if (!articleData.html && articleData.markdown) {
+      articleData.html = await simpleMarked.parse(articleData.markdown, { async: true })
     }
-    document.title = `《${resp.data.name}》`
+    article.value = articleData
+    document.title = `《${articleData.name}》`
     nextTick(() => initToc())
   })
 }
